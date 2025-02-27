@@ -1,3 +1,2 @@
-- fix edge server get_parameters (right now it returns 0)
-- train an actual ml model
+- fix evaluation
 - figure out persistence

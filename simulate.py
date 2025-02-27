@@ -39,7 +39,7 @@ def spawn_processes():
                     f'{config["client"]["host"]}:{config["client"]["port"]}'
                 )
             elif kind == "client":
-                cmd = f'py "{get_abs_path("client.py")}" {config["host"]}:{config["port"]}'
+                cmd = f'py "{get_abs_path("client.py")}" {config["host"]}:{config["port"]} --partition_id {config["partition_id"]}'
             else:
                 continue
 
@@ -66,7 +66,7 @@ def spawn_processes():
                     f'{config["client"]["host"]}:{config["client"]["port"]}'
                 )
             elif kind == "client":
-                cmd = f'python3 "{get_abs_path("client.py")}" {config["host"]}:{config["port"]}'
+                cmd = f'python3 "{get_abs_path("client.py")}" {config["host"]}:{config["port"]} --partition_id {config["partition_id"]}'
             else:
                 continue
 

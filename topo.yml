@@ -16,11 +16,13 @@ Client1:
   kind: client
   host: localhost
   port: 8001
+  partition_id: 0
 
 Client2:
   kind: client
   host: localhost
   port: 8001
+  partition_id: 1
 
 Edge2:
   kind: edge
@@ -35,8 +37,10 @@ Client3:
   kind: client
   host: localhost
   port: 8002
+  partition_id: 2
 
 Client4:
   kind: client
   host: localhost
   port: 8002
+  partition_id: 3

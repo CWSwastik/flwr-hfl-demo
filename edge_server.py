@@ -47,7 +47,13 @@ def run_edge_as_client(shared_state):
             self.shared_state = shared_state
 
         def get_parameters(self, config):
-            return self.shared_state.get("aggregated_model") or [np.array([0.0, 0.0, 0.0])]
+            if self.shared_state.get("aggregated_model") is not None:
+                return parameters_to_ndarrays(self.shared_state["aggregated_model"[0]])
+            
+            print("[Edge Client] No aggregated model available yet. Returning 0s.")
+            return [np.array([0.0, 0.0, 0.0])]
+
+
 
         def fit(self, parameters, config):
             print(f"[Edge Client] Received model from central server: {parameters}")
