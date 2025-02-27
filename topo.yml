@@ -1,0 +1,42 @@
+Coordinator:
+  kind: server
+  host: localhost
+  port: 8000
+
+Edge1:
+  kind: edge
+  server:
+    host: localhost
+    port: 8000
+  client:
+    host: localhost
+    port: 8001
+
+Client1:
+  kind: client
+  host: localhost
+  port: 8001
+
+Client2:
+  kind: client
+  host: localhost
+  port: 8001
+
+Edge2:
+  kind: edge
+  server:
+    host: localhost
+    port: 8000
+  client:
+    host: localhost
+    port: 8002
+
+Client3:
+  kind: client
+  host: localhost
+  port: 8002
+
+Client4:
+  kind: client
+  host: localhost
+  port: 8002

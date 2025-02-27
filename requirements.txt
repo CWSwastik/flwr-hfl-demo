@@ -1,0 +1,6 @@
+flwr
+flwr-datasets[vision]
+PyYAML
+torch 
+torchvision 
+matplotlib
