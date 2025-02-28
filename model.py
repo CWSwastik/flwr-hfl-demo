@@ -16,7 +16,8 @@ DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 print(f"Training on {DEVICE}")
 print(f"Flower {flwr.__version__} / PyTorch {torch.__version__}")
 
-NUM_CLIENTS = 4
+from config import NUM_CLIENTS
+
 BATCH_SIZE = 32
 
 def load_datasets(partition_id: int):
