@@ -49,10 +49,10 @@ if __name__ == "__main__":
     client = create_client(args.partition_id)
     while rounds < NUM_ROUNDS:
         try:
-            print(f"Starting client and connecting to {args.server_address}, partition_id: {args.partition_id}")
+            print(f"Starting client for Round {rounds} and connecting to {args.server_address}, partition_id: {args.partition_id}")
             fl.client.start_client(server_address=args.server_address, client=client)
             rounds += 1
         except Exception as e:
             print(f"Error: {type(e)}, Couldn't run client. Retrying in 10 seconds...")
     
-        time.sleep(10)
+        time.sleep(3)

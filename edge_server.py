@@ -24,13 +24,28 @@ class EdgeStrategy(fl.server.strategy.FedAvg):
         return aggregated_parameters
     
     def aggregate_evaluate(self, server_round, results, failures):
-        aggregated_eval = super().aggregate_evaluate(server_round, results, failures)
-
-        if aggregated_eval is not None:
-            self.shared_state["aggregated_eval"] = aggregated_eval
-            print(f"[Edge Server] Aggregated evaluation at round {server_round}: {type(aggregated_eval)} {aggregated_eval}")
+        if not results:
+            return None, {}
         
-        return aggregated_eval
+
+        aggregated_loss, aggregated_metrics = super().aggregate_evaluate(
+            server_round, results, failures
+        )
+
+        
+        self.shared_state["aggregated_loss"] = aggregated_loss
+        print(f"[Edge Server] Aggregated evaluation loss at round {server_round}: {aggregated_loss}")
+    
+        accuracies = [r.metrics["accuracy"] * r.num_examples for _, r in results]
+        examples = [r.num_examples for _, r in results]
+
+        aggregated_accuracy = sum(accuracies) / sum(examples)
+        self.shared_state["aggregated_accuracy"] = aggregated_accuracy
+        print(
+            f"[Edge Server] Round {server_round} accuracy aggregated from client results: {aggregated_accuracy}"
+        )
+
+        return float(aggregated_loss), {"accuracy": float(aggregated_accuracy)}
     
 def run_edge_server(shared_state, params):
     strategy = EdgeStrategy(
@@ -87,8 +102,9 @@ def run_edge_as_client(shared_state):
                 return default, len(default[0]), {}
 
         def evaluate(self, parameters, config):
-            agg_loss = self.shared_state.get("aggregated_eval")[0]
-            return agg_loss, 1, {"accuracy": 1.0} # the second and third values are placeholders for now
+            agg_loss = self.shared_state.get("aggregated_loss")
+            agg_accuracy = self.shared_state.get("aggregated_accuracy")
+            return agg_loss, 1, {"accuracy": agg_accuracy} # TODO: figure out num examples
 
     print(f"[Edge Client] Connecting to central server {args.server}")
     fl.client.start_client(
