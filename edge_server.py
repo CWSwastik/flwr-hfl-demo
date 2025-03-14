@@ -38,7 +38,7 @@ class EdgeStrategy(fl.server.strategy.FedAvg):
     
         accuracies = [r.metrics["accuracy"] * r.num_examples for _, r in results]
         examples = [r.num_examples for _, r in results]
-
+        print(list(zip(accuracies, examples)))
         aggregated_accuracy = sum(accuracies) / sum(examples)
         self.shared_state["aggregated_accuracy"] = aggregated_accuracy
         print(
@@ -104,7 +104,7 @@ def run_edge_as_client(shared_state):
         def evaluate(self, parameters, config):
             agg_loss = self.shared_state.get("aggregated_loss")
             agg_accuracy = self.shared_state.get("aggregated_accuracy")
-            return agg_loss, 1, {"accuracy": agg_accuracy} # TODO: figure out num examples
+            return float(agg_loss), 1, {"accuracy": agg_accuracy} # TODO: figure out num examples
 
     print(f"[Edge Client] Connecting to central server {args.server}")
     fl.client.start_client(

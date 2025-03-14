@@ -2,7 +2,8 @@ import flwr as fl
 from flwr.server import ServerConfig
 import argparse
 import matplotlib.pyplot as plt
-
+from model import Net, set_parameters, test, load_datasets
+from flwr.common import parameters_to_ndarrays
 from config import NUM_ROUNDS
 
 parser = argparse.ArgumentParser(description="Start the Flower central server.")
@@ -19,8 +20,19 @@ class FedAvgWithLogging(fl.server.strategy.FedAvg):
         super().__init__(min_fit_clients=2, min_available_clients=2)
 
     def evaluate(self, server_round, parameters):
-        return super().evaluate(server_round, parameters)
+        # if server_round == 0:
+        #     print("Skipping evaluation for round 0")
+        #     return super().evaluate(server_round, parameters)
+        
+        # print(f"[Central Server] Evaluate round {server_round}")
+        # net = Net()
+        # set_parameters(net, parameters_to_ndarrays(parameters))
+        # _, _, testloader = load_datasets(partition_id=0)
+        # loss, accuracy = test(net, testloader)
 
+        # print(f"[Central Server] Evaluate Round {server_round}: Loss = {loss}, Accuracy = {accuracy}")
+        return super().evaluate(server_round, parameters)
+    
     def aggregate_evaluate(self, server_round, results, failures):
         """Log loss values after each round."""
         global losses, accuracy
