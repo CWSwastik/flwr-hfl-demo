@@ -35,7 +35,7 @@ args = parser.parse_args()
 logger = Logger(
     subfolder="clients",
     file_path=f"{args.name}_{args.partition_id}_{args.model}.log",
-    headers=["round", "loss", "accuracy"],
+    headers=["round", "loss", "accuracy", "data_samples"],
 )
 
 
@@ -56,13 +56,20 @@ class FlowerClient(fl.client.NumPyClient):
             print("Received initial model from server, starting training...")
 
         train(self.net, self.trainloader, epochs=1)
-        return get_parameters(self.net), len(self.trainloader), {}
+        return get_parameters(self.net), len(self.trainloader.dataset), {}
 
     def evaluate(self, parameters, config):
         global rounds
         set_parameters(self.net, parameters)
         loss, accuracy = test(self.net, self.valloader)
-        logger.log({"round": rounds, "loss": loss, "accuracy": accuracy})
+        logger.log(
+            {
+                "round": rounds + 1,
+                "loss": loss,
+                "accuracy": accuracy,
+                "data_samples": len(self.valloader.dataset),
+            }
+        )
         return float(loss), len(self.valloader), {"accuracy": float(accuracy)}
 
 

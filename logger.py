@@ -17,10 +17,10 @@ class Logger:
         self._init_file()
 
     def _init_file(self):
-        if not self.file_path.exists():
-            with self.file_path.open("w", newline="") as f:
-                writer = csv.writer(f)
-                writer.writerow(self.headers)
+        # if not self.file_path.exists():
+        with self.file_path.open("w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(self.headers)
 
     def log(self, row_dict):
         # Add current timestamp to the row
