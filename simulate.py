@@ -6,6 +6,7 @@ import platform
 
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 
+
 def get_abs_path(filename):
     """Get the absolute path of a file in the same directory."""
     path = os.path.join(BASE_DIR, filename)
@@ -13,9 +14,10 @@ def get_abs_path(filename):
         print(f"⚠️ Warning: {filename} not found at {path}")
     return path
 
+
 def spawn_processes():
-    topo_file = get_abs_path("topo.yml")
-    
+    topo_file = get_abs_path("topologies/topo.yml")
+
     if not os.path.exists(topo_file):
         print(f"❌ Error: topo.yml not found at {topo_file}")
         return
@@ -39,11 +41,13 @@ def spawn_processes():
                     f'{config["client"]["host"]}:{config["client"]["port"]}'
                 )
             elif kind == "client":
-                cmd = f'py "{get_abs_path("client.py")}" {config["host"]}:{config["port"]} --partition_id {config["partition_id"]}'
+                cmd = f'py "{get_abs_path("client.py")}" {config["host"]}:{config["port"]} --partition_id {config["partition_id"]} --model {config["model"]}'
             else:
                 continue
 
-            commands.append(f'new-tab --title "{name}" -p "Command Prompt" cmd /k {cmd}')
+            commands.append(
+                f'new-tab --title "{name}" -p "Command Prompt" cmd /k {cmd}'
+            )
 
         if not shutil.which("wt"):
             print("❌ Error: Windows Terminal (wt) is not installed or not in PATH.")
@@ -66,11 +70,11 @@ def spawn_processes():
                     f'{config["client"]["host"]}:{config["client"]["port"]}'
                 )
             elif kind == "client":
-                cmd = f'python3 "{get_abs_path("client.py")}" {config["host"]}:{config["port"]} --partition_id {config["partition_id"]}'
+                cmd = f'python3 "{get_abs_path("client.py")}" {config["host"]}:{config["port"]} --partition_id {config["partition_id"]} --model {config["model"]}'
             else:
                 continue
 
-            tab_command = f'--tab --title="{name}" -- bash -c \'{cmd}; exec bash\''
+            tab_command = f"--tab --title=\"{name}\" -- bash -c '{cmd}; exec bash'"
             tabs.append(tab_command)
 
         if not shutil.which("gnome-terminal"):
@@ -82,6 +86,7 @@ def spawn_processes():
 
     else:
         print(f"❌ Unsupported OS: {current_os}")
+
 
 if __name__ == "__main__":
     spawn_processes()
