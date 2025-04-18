@@ -39,9 +39,10 @@ def spawn_processes():
                     f'py "{get_abs_path("edge_server.py")}" --server '
                     f'{config["server"]["host"]}:{config["server"]["port"]} --client '
                     f'{config["client"]["host"]}:{config["client"]["port"]}'
+                    f" --name {name}"
                 )
             elif kind == "client":
-                cmd = f'py "{get_abs_path("client.py")}" {config["host"]}:{config["port"]} --partition_id {config["partition_id"]} --model {config["model"]}'
+                cmd = f'py "{get_abs_path("client.py")}" {config["host"]}:{config["port"]} --partition_id {config["partition_id"]} --model {config["model"]} --name {name}'
             else:
                 continue
 
@@ -68,9 +69,10 @@ def spawn_processes():
                     f'python3 "{get_abs_path("edge_server.py")}" --server '
                     f'{config["server"]["host"]}:{config["server"]["port"]} --client '
                     f'{config["client"]["host"]}:{config["client"]["port"]}'
+                    f" --name {name}"
                 )
             elif kind == "client":
-                cmd = f'python3 "{get_abs_path("client.py")}" {config["host"]}:{config["port"]} --partition_id {config["partition_id"]} --model {config["model"]}'
+                cmd = f'python3 "{get_abs_path("client.py")}" {config["host"]}:{config["port"]} --partition_id {config["partition_id"]} --model {config["model"]} --name {name}'
             else:
                 continue
 

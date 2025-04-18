@@ -3,7 +3,7 @@ import numpy as np
 import time
 import argparse
 
-from model import (
+from utils import (
     load_datasets,
     get_parameters,
     set_parameters,
@@ -14,6 +14,8 @@ from model import (
 from config import NUM_ROUNDS
 
 import importlib
+from logger import Logger
+import os
 
 
 parser = argparse.ArgumentParser(description="Start a Flower client.")
@@ -25,7 +27,16 @@ parser.add_argument("--partition_id", type=int, default=0, help="Partition ID")
 parser.add_argument(
     "--model", type=str, default="lenet", help="Model name (default: lenet)"
 )
+parser.add_argument(
+    "--name", type=str, default="client", help="Client name (default: client)"
+)
 args = parser.parse_args()
+
+logger = Logger(
+    subfolder="clients",
+    file_path=f"{args.name}_{args.partition_id}_{args.model}.log",
+    headers=["round", "loss", "accuracy"],
+)
 
 
 class FlowerClient(fl.client.NumPyClient):
@@ -48,8 +59,10 @@ class FlowerClient(fl.client.NumPyClient):
         return get_parameters(self.net), len(self.trainloader), {}
 
     def evaluate(self, parameters, config):
+        global rounds
         set_parameters(self.net, parameters)
         loss, accuracy = test(self.net, self.valloader)
+        logger.log({"round": rounds, "loss": loss, "accuracy": accuracy})
         return float(loss), len(self.valloader), {"accuracy": float(accuracy)}
 
 
