@@ -58,7 +58,7 @@ def spawn_processes():
         subprocess.run(full_command, shell=True)
 
     elif current_os == "Linux":
-        tabs = []
+        procs = []
 
         for name, config in topology.items():
             kind = config.get("kind")
@@ -76,8 +76,10 @@ def spawn_processes():
             else:
                 continue
 
-            subprocess.Popen(cmd, shell=True)
+            procs.append(subprocess.Popen(cmd, shell=True))
 
+        for proc in procs:
+            proc.wait()
     else:
         print(f"❌ Unsupported OS: {current_os}")
 
