@@ -76,15 +76,7 @@ def spawn_processes():
             else:
                 continue
 
-            tab_command = f"--tab --title=\"{name}\" -- bash -c '{cmd}; exec bash'"
-            tabs.append(tab_command)
-
-        if not shutil.which("gnome-terminal"):
-            print("❌ Error: gnome-terminal is not installed or not in PATH.")
-            return
-
-        full_command = "gnome-terminal " + " ".join(tabs)
-        subprocess.run(full_command, shell=True)
+            subprocess.Popen(cmd, shell=True)
 
     else:
         print(f"❌ Unsupported OS: {current_os}")
