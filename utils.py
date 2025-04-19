@@ -6,11 +6,12 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torchvision.transforms as transforms
-from datasets.utils.logging import disable_progress_bar
 from torch.utils.data import DataLoader
 
 import flwr
+from typing import Optional
 from flwr_datasets import FederatedDataset
+from flwr_datasets.partitioner import DirichletPartitioner
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 print(f"Training on {DEVICE}")
@@ -21,9 +22,23 @@ from config import NUM_CLIENTS
 BATCH_SIZE = 32
 
 
-def load_datasets(partition_id: int):
-    fds = FederatedDataset(dataset="cifar10", partitioners={"train": NUM_CLIENTS})
-    partition = fds.load_partition(partition_id)
+def load_datasets(partition_id: Optional[int] = None):
+
+    if partition_id is None:
+        num_partitions = 1
+        pid = 0
+    else:
+        num_partitions = NUM_CLIENTS
+        pid = partition_id
+
+    partitioner = DirichletPartitioner(
+        num_partitions=num_partitions,
+        partition_by="label",
+        alpha=0.5,
+        self_balancing=True,
+    )
+    fds = FederatedDataset(dataset="cifar10", partitioners={"train": partitioner})
+    partition = fds.load_partition(pid)
     # Divide data on each node: 80% train, 20% test
     partition_train_test = partition.train_test_split(test_size=0.2, seed=42)
     pytorch_transforms = transforms.Compose(

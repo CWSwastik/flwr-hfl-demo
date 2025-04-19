@@ -5,6 +5,10 @@ import matplotlib.pyplot as plt
 from config import NUM_ROUNDS
 from logger import Logger
 
+from models.lenet import Net
+from utils import set_parameters, test, load_datasets
+from flwr.common import parameters_to_ndarrays
+
 parser = argparse.ArgumentParser(description="Start the Flower central server.")
 parser.add_argument(
     "address", help="Server address in the format host:port (e.g., 0.0.0.0:8081)"
@@ -32,17 +36,19 @@ class FedAvgWithLogging(fl.server.strategy.FedAvg):
         )
 
     def evaluate(self, server_round, parameters):
-        # if server_round == 0:
-        #     print("Skipping evaluation for round 0")
-        #     return super().evaluate(server_round, parameters)
+        if server_round == 0:
+            print("Skipping evaluation for round 0")
+            return super().evaluate(server_round, parameters)
 
-        # print(f"[Central Server] Evaluate round {server_round}")
-        # net = Net()
-        # set_parameters(net, parameters_to_ndarrays(parameters))
-        # _, _, testloader = load_datasets(partition_id=0)
-        # loss, accuracy = test(net, testloader)
+        print(f"[Central Server] Evaluate round {server_round}")
+        net = Net()
+        set_parameters(net, parameters_to_ndarrays(parameters))
+        _, _, testloader = load_datasets()  # full dataset for evaluation
+        loss, accuracy = test(net, testloader)
 
-        # print(f"[Central Server] Evaluate Round {server_round}: Loss = {loss}, Accuracy = {accuracy}")
+        print(
+            f"[Central Server] Evaluate Round {server_round}: Loss = {loss}, Accuracy = {accuracy}"
+        )
         return super().evaluate(server_round, parameters)
 
     def aggregate_evaluate(self, server_round, results, failures):
