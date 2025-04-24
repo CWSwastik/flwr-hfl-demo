@@ -65,6 +65,7 @@ def load_datasets(partition_id: Optional[int] = None):
 
 def train(net, trainloader, epochs: int, verbose=False):
     """Train the network on the training set."""
+    net.to(DEVICE)
     criterion = torch.nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(net.parameters())
     net.train()
@@ -89,6 +90,7 @@ def train(net, trainloader, epochs: int, verbose=False):
 
 def test(net, testloader):
     """Evaluate the network on the entire test set."""
+    net.to(DEVICE)
     criterion = torch.nn.CrossEntropyLoss()
     correct, total, loss = 0, 0, 0.0
     net.eval()
