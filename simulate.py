@@ -28,6 +28,11 @@ def spawn_processes():
 
     current_os = platform.system()
 
+    order = {"server": 0, "edge": 1, "client": 2}
+    topology = dict(
+        sorted(topology.items(), key=lambda item: order.get(item[1].get("kind"), 99))
+    )
+
     if current_os == "Windows":
         commands = []
 
