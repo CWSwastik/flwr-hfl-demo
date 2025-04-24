@@ -3,6 +3,7 @@ import yaml
 import os
 import shutil
 import platform
+import time
 
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 
@@ -76,10 +77,17 @@ def spawn_processes():
             else:
                 continue
 
-            procs.append(subprocess.Popen(cmd, shell=True))
+            procs.append((name, subprocess.Popen(cmd, shell=True)))
+            print(f"Starting process {name}")
+            if kind:
+                time.sleep(60)
 
-        for proc in procs:
-            proc.wait()
+        while procs:
+            for p in procs[:]:
+                if p[1].poll() is not None:
+                    print(f"Process {p[0]} has ended")
+                    procs.remove(p)
+            time.sleep(5)
     else:
         print(f"❌ Unsupported OS: {current_os}")
 
