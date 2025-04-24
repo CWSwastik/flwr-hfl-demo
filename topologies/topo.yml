@@ -1,28 +1,28 @@
 Coordinator:
   kind: server
   host: localhost
-  port: 8080
+  port: 5000
 
 Edge1:
   kind: edge
   server:
     host: localhost
-    port: 8080
+    port: 5000
   client:
     host: localhost
-    port: 8081
+    port: 5001
 
 Client1:
   kind: client
   host: localhost
-  port: 8081
+  port: 5001
   partition_id: 0
   model: lenet
 
 Client2:
   kind: client
   host: localhost
-  port: 8081
+  port: 5001
   partition_id: 1
   model: lenet
 
@@ -30,21 +30,21 @@ Edge2:
   kind: edge
   server:
     host: localhost
-    port: 8080
+    port: 5000
   client:
     host: localhost
-    port: 8082
+    port: 5002
 
 Client3:
   kind: client
   host: localhost
-  port: 8082
+  port: 5002
   partition_id: 2
   model: lenet
 
 Client4:
   kind: client
   host: localhost
-  port: 8082
+  port: 5002
   partition_id: 3
   model: lenet

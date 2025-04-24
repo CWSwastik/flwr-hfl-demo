@@ -90,7 +90,7 @@ def spawn_processes():
         while procs:
             for p in procs[:]:
                 if p[1].poll() is not None:
-                    print(f"Process {p[0]} has ended")
+                    print(f"❌ Process {p[0]} has ended")
                     procs.remove(p)
             time.sleep(5)
     else:

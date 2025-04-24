@@ -1,3 +1,5 @@
+import sys
+import traceback
 import flwr as fl
 from flwr.server import ServerConfig
 from flwr.common import parameters_to_ndarrays, ndarrays_to_parameters
@@ -77,7 +79,7 @@ def run_edge_server(shared_state, params):
     )
     config = ServerConfig(num_rounds=1)
 
-    print(f"[Edge Server] Starting on {args.client}")
+    print(f"[Edge Server {args.name}] Starting on {args.client}")
     fl.server.start_server(server_address=args.client, strategy=strategy, config=config)
 
 
@@ -90,11 +92,13 @@ def run_edge_as_client(shared_state):
             if self.shared_state.get("aggregated_model") is not None:
                 return parameters_to_ndarrays(self.shared_state["aggregated_model"[0]])
 
-            print("[Edge Client] No aggregated model available yet. Returning 0s.")
+            print(
+                f"[Edge Client {args.name}] No aggregated model available yet. Returning 0s."
+            )
             return [np.array([0.0, 0.0, 0.0])]
 
         def fit(self, parameters, config):
-            print(f"[Edge Client] Received model from central server.")
+            print(f"[Edge Client {args.name}] Received model from central server.")
 
             # Start the edge server process for local aggregation
             server_process = multiprocessing.Process(
@@ -108,7 +112,7 @@ def run_edge_as_client(shared_state):
             if agg_model is not None:
                 num_examples = 1
                 res = parameters_to_ndarrays(agg_model[0])
-                print(f"[Edge Client] Sending model to central server.")
+                print(f"[Edge Client {args.name}] Sending model to central server.")
                 return res, num_examples, {}
             else:
                 default = [np.array([0.0, 0.0, 0.0])]
@@ -131,10 +135,19 @@ def run_edge_as_client(shared_state):
                 {"accuracy": agg_accuracy},
             )  # TODO: figure out num examples
 
-    print(f"[Edge Client] Connecting to central server {args.server}")
+    print(f"[Edge Client {args.name}] Connecting to central server {args.server}")
     fl.client.start_client(
         server_address=args.server, client=EdgeClient(shared_state).to_client()
     )
+
+
+def run_edge_as_client_with_error_handling(shared_state):
+    try:
+        run_edge_as_client(shared_state)
+    except Exception:
+        error_msg = traceback.format_exc()
+        print(f"[ERROR] Exception in run_edge_as_client:\n{error_msg}", file=sys.stderr)
+        sys.stderr.flush()
 
 
 if __name__ == "__main__":
@@ -144,7 +157,8 @@ if __name__ == "__main__":
     shared_state["aggregated_eval"] = None
 
     client_process = multiprocessing.Process(
-        target=run_edge_as_client, args=(shared_state,)
+        target=run_edge_as_client_with_error_handling, args=(shared_state,)
     )
     client_process.start()
     client_process.join()
+    print(f"[Edge Server {args.name}] Edge client process has ended.")
