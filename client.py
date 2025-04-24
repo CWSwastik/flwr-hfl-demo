@@ -16,6 +16,7 @@ from config import NUM_ROUNDS
 import importlib
 from logger import Logger
 import os
+import sys, traceback
 
 
 parser = argparse.ArgumentParser(description="Start a Flower client.")
@@ -95,6 +96,7 @@ if __name__ == "__main__":
             fl.client.start_client(server_address=args.server_address, client=client)
             rounds += 1
         except Exception as e:
+            traceback.print_exception(type(e), e, e.__traceback__, file=sys.stderr)
             print(f"Error: {type(e)}, Couldn't run client. Retrying in 10 seconds...")
 
         time.sleep(3)
