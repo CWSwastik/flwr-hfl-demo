@@ -5,9 +5,9 @@ import sys
 import logging
 
 
-class OnlyInfoFilter(logging.Filter):
+class RemoveWarningsFilter(logging.Filter):
     def filter(self, record):
-        return record.levelno == logging.INFO
+        return record.levelno != logging.WARN
 
 
 # Get the library's logger
@@ -17,7 +17,7 @@ lib_logger.setLevel(logging.DEBUG)  # set low to allow everything through
 # Create a handler that filters only INFO logs
 handler = logging.StreamHandler(sys.stdout)
 handler.setLevel(logging.DEBUG)
-handler.addFilter(OnlyInfoFilter())
+handler.addFilter(RemoveWarningsFilter())
 handler.setFormatter(
     logging.Formatter("\x1b[32m%(name)s - %(levelname)s\x1b[0m: %(message)s")
 )
