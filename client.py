@@ -84,14 +84,14 @@ def create_client(partition_id, model) -> fl.client.Client:
 
 
 if __name__ == "__main__":
-
+    print(
+        f"Starting client {args.name} with partition_id {args.partition_id} and connecting to {args.server_address}"
+    )
     rounds = 0
     client = create_client(args.partition_id, model=args.model)
     while rounds < NUM_ROUNDS:
         try:
-            print(
-                f"Starting client for Round {rounds} and connecting to {args.server_address}, partition_id: {args.partition_id}"
-            )
+            print(f"Starting client {args.name} for Round {rounds}")
             fl.client.start_client(server_address=args.server_address, client=client)
             rounds += 1
         except Exception as e:

@@ -84,8 +84,7 @@ def spawn_processes():
 
             procs.append((name, subprocess.Popen(cmd, shell=True)))
             print(f"Starting process {name}")
-            if kind:
-                time.sleep(60)
+            time.sleep(45)
 
         while procs:
             for p in procs[:]:
