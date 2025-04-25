@@ -12,11 +12,11 @@ class RemoveWarningsFilter(logging.Filter):
 
 # Get the library's logger
 lib_logger = logging.getLogger("flwr")
-lib_logger.setLevel(logging.DEBUG)  # set low to allow everything through
+lib_logger.setLevel(logging.INFO)  # set low to allow everything through
 
 # Create a handler that filters only INFO logs
 handler = logging.StreamHandler(sys.stdout)
-handler.setLevel(logging.DEBUG)
+handler.setLevel(logging.INFO)
 handler.addFilter(RemoveWarningsFilter())
 handler.setFormatter(
     logging.Formatter("\x1b[32m%(name)s - %(levelname)s\x1b[0m: %(message)s")
