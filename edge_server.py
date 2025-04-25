@@ -84,20 +84,6 @@ def run_edge_server(shared_state, params):
     fl.server.start_server(server_address=args.client, strategy=strategy, config=config)
 
 
-def run_edge_server_with_error_handling(shared_state, params):
-    try:
-        run_edge_server(shared_state, params)
-        print(
-            f"[Edge Server {args.name}] Edge server process has ended with no errors."
-        )
-    except Exception:
-        error_msg = traceback.format_exc()
-        log_file = f"./logs/edge/{args.name}-err.log"
-        with open(log_file, "a") as f:
-            f.write(f"[ERROR] Exception in run_edge_server:\n{error_msg}\n")
-        print(f"[ERROR] Exception in run_edge_server:\n{error_msg}\n")
-
-
 def run_edge_as_client(shared_state):
     class EdgeClient(fl.client.NumPyClient):
         def __init__(self, shared_state):
@@ -105,7 +91,7 @@ def run_edge_as_client(shared_state):
 
         def get_parameters(self, config):
             if self.shared_state.get("aggregated_model") is not None:
-                return parameters_to_ndarrays(self.shared_state["aggregated_model"[0]])
+                return parameters_to_ndarrays(self.shared_state["aggregated_model"])
 
             print(
                 f"[Edge Client {args.name}] No aggregated model available yet. Returning 0s."
@@ -117,7 +103,7 @@ def run_edge_as_client(shared_state):
 
             # Start the edge server process for local aggregation
             server_process = multiprocessing.Process(
-                target=run_edge_server_with_error_handling,
+                target=run_edge_server,
                 args=(self.shared_state, parameters),
             )
             server_process.start()
@@ -157,43 +143,6 @@ def run_edge_as_client(shared_state):
     )
 
 
-def run_edge_as_client_with_error_handling(shared_state):
-    try:
-        run_edge_as_client(shared_state)
-        print(
-            f"[Edge Client {args.name}] Edge client process has ended with no errors."
-        )
-        logger.log(
-            {
-                "round": -3,
-                "aggregated_loss": 0,
-                "aggregated_accuracy": 0,
-            }
-        )
-    except Exception:
-        error_msg = traceback.format_exc()
-        log_file = f"./logs/edge/{args.name}-err.log"
-        with open(log_file, "a") as f:
-            f.write(f"[ERROR] Exception in run_edge_as_client:\n{error_msg}\n")
-        print(f"[ERROR] Exception in run_edge_as_client:\n{error_msg}\n")
-        logger.log(
-            {
-                "round": -2,
-                "aggregated_loss": error_msg,
-                "aggregated_accuracy": 0,
-            }
-        )
-    finally:
-        logger.log(
-            {
-                "round": -1,
-                "aggregated_loss": 0,
-                "aggregated_accuracy": 0,
-            }
-        )
-        print(f"[Edge Client {args.name}] Terminating process.")
-
-
 if __name__ == "__main__":
     manager = multiprocessing.Manager()
     shared_state = manager.dict()
@@ -201,7 +150,7 @@ if __name__ == "__main__":
     shared_state["aggregated_eval"] = None
 
     client_process = multiprocessing.Process(
-        target=run_edge_as_client_with_error_handling, args=(shared_state,)
+        target=run_edge_as_client, args=(shared_state,)
     )
     client_process.start()
     client_process.join()
