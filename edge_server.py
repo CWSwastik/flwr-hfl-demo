@@ -146,8 +146,9 @@ def run_edge_as_client_with_error_handling(shared_state):
         run_edge_as_client(shared_state)
     except Exception:
         error_msg = traceback.format_exc()
-        print(f"[ERROR] Exception in run_edge_as_client:\n{error_msg}", file=sys.stderr)
-        sys.stderr.flush()
+        log_file = f"./logs/edge/{args.name}-err.log"
+        with open(log_file, "a") as f:
+            f.write(f"[ERROR] Exception in run_edge_as_client:\n{error_msg}\n")
 
 
 if __name__ == "__main__":
