@@ -144,6 +144,7 @@ def run_edge_as_client(shared_state):
 
 
 if __name__ == "__main__":
+    multiprocessing.set_start_method("spawn", force=True)
     manager = multiprocessing.Manager()
     shared_state = manager.dict()
     shared_state["aggregated_model"] = None
