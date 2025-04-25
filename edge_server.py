@@ -83,6 +83,19 @@ def run_edge_server(shared_state, params):
     fl.server.start_server(server_address=args.client, strategy=strategy, config=config)
 
 
+def run_edge_server_with_error_handling(shared_state, params):
+    try:
+        run_edge_server(shared_state, params)
+        print(
+            f"[Edge Server {args.name}] Edge server process has ended with no errors."
+        )
+    except Exception:
+        error_msg = traceback.format_exc()
+        log_file = f"./logs/edge/{args.name}-err.log"
+        with open(log_file, "a") as f:
+            f.write(f"[ERROR] Exception in run_edge_server:\n{error_msg}\n")
+
+
 def run_edge_as_client(shared_state):
     class EdgeClient(fl.client.NumPyClient):
         def __init__(self, shared_state):
@@ -102,7 +115,8 @@ def run_edge_as_client(shared_state):
 
             # Start the edge server process for local aggregation
             server_process = multiprocessing.Process(
-                target=run_edge_server, args=(self.shared_state, parameters)
+                target=run_edge_server_with_error_handling,
+                args=(self.shared_state, parameters),
             )
             server_process.start()
             server_process.join()
@@ -144,6 +158,9 @@ def run_edge_as_client(shared_state):
 def run_edge_as_client_with_error_handling(shared_state):
     try:
         run_edge_as_client(shared_state)
+        print(
+            f"[Edge Client {args.name}] Edge client process has ended with no errors."
+        )
     except Exception:
         error_msg = traceback.format_exc()
         log_file = f"./logs/edge/{args.name}-err.log"
