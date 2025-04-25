@@ -38,6 +38,7 @@ class EdgeStrategy(fl.server.strategy.FedAvg):
         self.shared_state = shared_state
 
     def aggregate_fit(self, rnd, results, failures):
+        print(f"[Edge Server {args.name}] Aggregating fit results at round {rnd}.")
         aggregated_parameters = super().aggregate_fit(rnd, results, failures)
         if aggregated_parameters is not None:
             self.shared_state["aggregated_model"] = aggregated_parameters
@@ -94,6 +95,7 @@ def run_edge_server_with_error_handling(shared_state, params):
         log_file = f"./logs/edge/{args.name}-err.log"
         with open(log_file, "a") as f:
             f.write(f"[ERROR] Exception in run_edge_server:\n{error_msg}\n")
+        print(f"[ERROR] Exception in run_edge_server:\n{error_msg}\n")
 
 
 def run_edge_as_client(shared_state):
@@ -166,6 +168,7 @@ def run_edge_as_client_with_error_handling(shared_state):
         log_file = f"./logs/edge/{args.name}-err.log"
         with open(log_file, "a") as f:
             f.write(f"[ERROR] Exception in run_edge_as_client:\n{error_msg}\n")
+        print(f"[ERROR] Exception in run_edge_as_client:\n{error_msg}\n")
 
 
 if __name__ == "__main__":
