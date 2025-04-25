@@ -1,0 +1,41 @@
+Coordinator:
+  kind: server
+  host: localhost
+
+Edge1:
+  kind: edge
+  server:
+    host: Coordinator
+  client:
+    host: localhost
+
+Client1:
+  kind: client
+  host: Edge1
+  partition_id: 0
+  model: lenet
+
+Client2:
+  kind: client
+  host: Edge1
+  partition_id: 1
+  model: lenet
+
+Edge2:
+  kind: edge
+  server:
+    host: Coordinator
+  client:
+    host: localhost
+
+Client3:
+  kind: client
+  host: Edge2
+  partition_id: 2
+  model: lenet
+
+Client4:
+  kind: client
+  host: Edge2
+  partition_id: 3
+  model: lenet
