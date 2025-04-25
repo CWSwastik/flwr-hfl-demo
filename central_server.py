@@ -23,9 +23,6 @@ logger = Logger(
 
 server_address = args.address
 
-losses = []
-accuracy = []
-
 
 class FedAvgWithLogging(fl.server.strategy.FedAvg):
     def __init__(self):
@@ -45,6 +42,13 @@ class FedAvgWithLogging(fl.server.strategy.FedAvg):
         set_parameters(net, parameters_to_ndarrays(parameters))
         _, _, testloader = load_datasets()  # full dataset for evaluation
         loss, accuracy = test(net, testloader)
+        logger.log(
+            {
+                "round": server_round,
+                "aggregated_loss": loss,
+                "aggregated_accuracy": accuracy,
+            }
+        )
 
         print(
             f"[Central Server] Evaluate Round {server_round}: Loss = {loss}, Accuracy = {accuracy}"
@@ -53,7 +57,6 @@ class FedAvgWithLogging(fl.server.strategy.FedAvg):
 
     def aggregate_evaluate(self, server_round, results, failures):
         """Log loss values after each round."""
-        global losses, accuracy
 
         if not results:
             return None, {}
@@ -72,16 +75,7 @@ class FedAvgWithLogging(fl.server.strategy.FedAvg):
         print(
             f"[Central Server] Round {server_round}: Average Accuracy = {sum(accuracies) / sum(examples)}"
         )
-        losses.append(aggregated_loss)
-        accuracy.append(aggregated_accuracy)
 
-        logger.log(
-            {
-                "round": server_round,
-                "aggregated_loss": aggregated_loss,
-                "aggregated_accuracy": aggregated_accuracy,
-            }
-        )
         return float(aggregated_loss), {"accuracy": float(aggregated_accuracy)}
 
 
@@ -93,22 +87,3 @@ if __name__ == "__main__":
     fl.server.start_server(
         server_address=server_address, strategy=strategy, config=config
     )
-
-    fig, ax1 = plt.subplots(figsize=(10, 6))
-
-    rounds = range(1, len(losses) + 1)
-
-    ax1.plot(rounds, losses, marker="o", linestyle="-", color="b", label="Loss")
-    ax1.set_xlabel("Round")
-    ax1.set_ylabel("Loss", color="b")
-    ax1.tick_params(axis="y", labelcolor="b")
-    ax1.grid(True)
-
-    ax2 = ax1.twinx()
-    ax2.plot(rounds, accuracy, marker="s", linestyle="--", color="r", label="Accuracy")
-    ax2.set_ylabel("Accuracy", color="r")
-    ax2.tick_params(axis="y", labelcolor="r")
-
-    plt.title("Loss and Accuracy over Rounds")
-    fig.tight_layout()
-    plt.show()

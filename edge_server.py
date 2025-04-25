@@ -124,6 +124,9 @@ def run_edge_as_client(shared_state):
             agg_loss = self.shared_state.get("aggregated_loss")
             agg_accuracy = self.shared_state.get("aggregated_accuracy")
 
+            print(
+                f"[Edge Client {args.name}] Received aggregated loss: {agg_loss} and accuracy: {agg_accuracy}"
+            )
             logger.log(
                 {
                     "round": config["round"],
