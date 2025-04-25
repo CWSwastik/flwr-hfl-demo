@@ -163,12 +163,35 @@ def run_edge_as_client_with_error_handling(shared_state):
         print(
             f"[Edge Client {args.name}] Edge client process has ended with no errors."
         )
+        logger.log(
+            {
+                "round": -3,
+                "aggregated_loss": 0,
+                "aggregated_accuracy": 0,
+            }
+        )
     except Exception:
         error_msg = traceback.format_exc()
         log_file = f"./logs/edge/{args.name}-err.log"
         with open(log_file, "a") as f:
             f.write(f"[ERROR] Exception in run_edge_as_client:\n{error_msg}\n")
         print(f"[ERROR] Exception in run_edge_as_client:\n{error_msg}\n")
+        logger.log(
+            {
+                "round": -2,
+                "aggregated_loss": error_msg,
+                "aggregated_accuracy": 0,
+            }
+        )
+    finally:
+        logger.log(
+            {
+                "round": -1,
+                "aggregated_loss": 0,
+                "aggregated_accuracy": 0,
+            }
+        )
+        print(f"[Edge Client {args.name}] Terminating process.")
 
 
 if __name__ == "__main__":
