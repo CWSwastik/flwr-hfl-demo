@@ -42,6 +42,7 @@ class EdgeStrategy(fl.server.strategy.FedAvg):
         aggregated_parameters = super().aggregate_fit(rnd, results, failures)
         if aggregated_parameters is not None:
             self.shared_state["aggregated_model"] = aggregated_parameters
+            # print(parameters_to_ndarrays(aggregated_parameters[0])[0][0][0][0])
             print(f"[Edge Server] Aggregated model at round {rnd}.")
         return aggregated_parameters
 
@@ -62,6 +63,8 @@ class EdgeStrategy(fl.server.strategy.FedAvg):
         examples = [r.num_examples for _, r in results]
         print(list(zip(accuracies, examples)))
         aggregated_accuracy = sum(accuracies) / sum(examples)
+        self.shared_state["num_examples"] = sum(examples)
+        print(f"[Edge Server] Number of examples: {self.shared_state['num_examples']}")
         self.shared_state["aggregated_accuracy"] = aggregated_accuracy
         print(
             f"[Edge Server] Round {server_round} accuracy aggregated from client results: {aggregated_accuracy}"
@@ -112,17 +115,18 @@ def run_edge_as_client(shared_state):
             agg_model = self.shared_state.get("aggregated_model")
 
             if agg_model is not None:
-                num_examples = 1
+                num_examples = self.shared_state.get("num_examples")
                 res = parameters_to_ndarrays(agg_model[0])
                 print(f"[Edge Client {args.name}] Sending model to central server.")
                 return res, num_examples, {}
             else:
                 default = [np.array([0.0, 0.0, 0.0])]
-                return default, len(default[0]), {}
+                return default, 1, {}
 
         def evaluate(self, parameters, config):
             agg_loss = self.shared_state.get("aggregated_loss")
             agg_accuracy = self.shared_state.get("aggregated_accuracy")
+            num_examples = self.shared_state.get("num_examples")
 
             print(
                 f"[Edge Client {args.name}] Received aggregated loss: {agg_loss} and accuracy: {agg_accuracy}"
@@ -136,9 +140,9 @@ def run_edge_as_client(shared_state):
             )
             return (
                 float(agg_loss),
-                1,
+                num_examples,
                 {"accuracy": agg_accuracy},
-            )  # TODO: figure out num examples
+            )
 
     print(f"[Edge Client {args.name}] Connecting to central server {args.server}")
     fl.client.start_client(
@@ -152,6 +156,7 @@ if __name__ == "__main__":
     shared_state = manager.dict()
     shared_state["aggregated_model"] = None
     shared_state["aggregated_eval"] = None
+    shared_state["num_examples"] = 0
 
     client_process = multiprocessing.Process(
         target=run_edge_as_client, args=(shared_state,)

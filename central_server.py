@@ -39,6 +39,7 @@ class FedAvgWithLogging(fl.server.strategy.FedAvg):
 
         print(f"[Central Server] Evaluate round {server_round}")
         net = Net()
+        # print(parameters_to_ndarrays(parameters)[0][0][0][0])
         set_parameters(net, parameters_to_ndarrays(parameters))
         _, _, testloader = load_datasets()  # full dataset for evaluation
         loss, accuracy = test(net, testloader)
@@ -68,6 +69,7 @@ class FedAvgWithLogging(fl.server.strategy.FedAvg):
         accuracies = [r.metrics["accuracy"] * r.num_examples for _, r in results]
         examples = [r.num_examples for _, r in results]
         aggregated_accuracy = sum(accuracies) / sum(examples)
+        # print(list(zip(accuracies, examples)))
 
         print(
             f"[Central Server] Round {server_round}: Average Loss = {aggregated_loss}"

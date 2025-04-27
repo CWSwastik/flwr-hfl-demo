@@ -57,6 +57,7 @@ class FlowerClient(fl.client.NumPyClient):
             print("Received initial model from server, starting training...")
 
         train(self.net, self.trainloader, epochs=1)
+        # print(get_parameters(self.net)[0][0][0][0])
         return get_parameters(self.net), len(self.trainloader.dataset), {}
 
     def evaluate(self, parameters, config):
@@ -71,7 +72,7 @@ class FlowerClient(fl.client.NumPyClient):
                 "data_samples": len(self.valloader.dataset),
             }
         )
-        return float(loss), len(self.valloader), {"accuracy": float(accuracy)}
+        return float(loss), len(self.valloader.dataset), {"accuracy": float(accuracy)}
 
 
 def create_client(partition_id, model) -> fl.client.Client:
@@ -80,7 +81,8 @@ def create_client(partition_id, model) -> fl.client.Client:
     net = model_module.Net().to(DEVICE)
 
     trainloader, valloader, _ = load_datasets(partition_id=partition_id)
-
+    print("Trainloader size:", len(trainloader.dataset))
+    print("Valloader size:", len(valloader.dataset))
     return FlowerClient(net, trainloader, valloader).to_client()
 
 
