@@ -1,9 +1,9 @@
-NUM_ROUNDS = 2500
+NUM_ROUNDS = 250
 TOPOLOGY_FILE = "topo.yml"
 
 NUM_CLIENTS = 4
 BATCH_SIZE = 32
-PARTITIONER = "dirichlet"  # "iid" or "dirichlet"
+PARTITIONER = "iid"  # "iid" or "dirichlet"
 DIRICHLET_ALPHA = 0.5
 
 TRAINING_LEARNING_RATE = 10 * 1e-4
