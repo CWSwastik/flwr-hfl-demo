@@ -86,5 +86,4 @@ axs[2][1].grid(True)
 axs[2][1].legend()
 
 # Show all plots
-# plt.show()
-plt.savefig("logs/plots.png")
+plt.savefig(os.path.join(current_dir, "plot.png"))
