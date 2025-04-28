@@ -69,6 +69,8 @@ def train(net, trainloader, epochs: int, verbose=False):
     criterion = torch.nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(net.parameters(), lr=1e-4)
     net.train()
+    losses = []
+    accuracies = []
     for epoch in range(epochs):
         correct, total, epoch_loss = 0, 0, 0.0
         for batch in trainloader:
@@ -84,8 +86,13 @@ def train(net, trainloader, epochs: int, verbose=False):
             correct += (torch.max(outputs.data, 1)[1] == labels).sum().item()
         epoch_loss /= len(trainloader.dataset)
         epoch_acc = correct / total
+
+        losses.append(epoch_loss.item())
+        accuracies.append(epoch_acc)
         if verbose:
             print(f"Epoch {epoch+1}: train loss {epoch_loss}, accuracy {epoch_acc}")
+
+    return losses, accuracies
 
 
 def test(net, testloader):

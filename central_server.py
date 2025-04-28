@@ -18,7 +18,7 @@ args = parser.parse_args()
 logger = Logger(
     subfolder="central",
     file_path="central_server.log",
-    headers=["round", "aggregated_loss", "aggregated_accuracy"],
+    headers=["round", "loss", "accuracy"],
 )
 
 server_address = args.address
@@ -46,8 +46,8 @@ class FedAvgWithLogging(fl.server.strategy.FedAvg):
         logger.log(
             {
                 "round": server_round,
-                "aggregated_loss": loss,
-                "aggregated_accuracy": accuracy,
+                "loss": loss,
+                "accuracy": accuracy,
             }
         )
 

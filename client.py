@@ -33,9 +33,15 @@ parser.add_argument(
 )
 args = parser.parse_args()
 
-logger = Logger(
+test_logger = Logger(
     subfolder="clients",
-    file_path=f"{args.name}_{args.partition_id}_{args.model}.log",
+    file_path=f"{args.name}_{args.model}_test.log",
+    headers=["round", "loss", "accuracy", "data_samples"],
+)
+
+train_logger = Logger(
+    subfolder="clients",
+    file_path=f"{args.name}_{args.model}_train.log",
     headers=["round", "loss", "accuracy", "data_samples"],
 )
 
@@ -45,28 +51,37 @@ class FlowerClient(fl.client.NumPyClient):
         self.net = net
         self.trainloader = trainloader
         self.valloader = valloader
+        self.round = 0
 
     def get_parameters(self, config):
         return get_parameters(self.net)
 
     def fit(self, parameters, config):
+
         if not np.all(parameters[0] == 0):
             print(f"Received new global model from server")
             set_parameters(self.net, parameters)
         else:
             print("Received initial model from server, starting training...")
 
-        train(self.net, self.trainloader, epochs=1)
+        losses, accuracies = train(self.net, self.trainloader, epochs=1)
+        train_logger.log(
+            {
+                "round": self.round,
+                "loss": losses[0],
+                "accuracy": accuracies[0],
+                "data_samples": len(self.trainloader.dataset),
+            }
+        )
         # print(get_parameters(self.net)[0][0][0][0])
         return get_parameters(self.net), len(self.trainloader.dataset), {}
 
     def evaluate(self, parameters, config):
-        global rounds
         set_parameters(self.net, parameters)
         loss, accuracy = test(self.net, self.valloader)
-        logger.log(
+        test_logger.log(
             {
-                "round": rounds + 1,
+                "round": self.round,
                 "loss": loss,
                 "accuracy": accuracy,
                 "data_samples": len(self.valloader.dataset),
@@ -83,20 +98,21 @@ def create_client(partition_id, model) -> fl.client.Client:
     trainloader, valloader, _ = load_datasets(partition_id=partition_id)
     print("Trainloader size:", len(trainloader.dataset))
     print("Valloader size:", len(valloader.dataset))
-    return FlowerClient(net, trainloader, valloader).to_client()
+    return FlowerClient(net, trainloader, valloader)
 
 
 if __name__ == "__main__":
     print(
         f"Starting client {args.name} with partition_id {args.partition_id} and connecting to {args.server_address}"
     )
-    rounds = 0
     client = create_client(args.partition_id, model=args.model)
-    while rounds < NUM_ROUNDS:
+    while client.round <= NUM_ROUNDS:
         try:
-            print(f"Starting client {args.name} for Round {rounds}")
-            fl.client.start_client(server_address=args.server_address, client=client)
-            rounds += 1
+            print(f"Starting client {args.name} for Round {client.round}")
+            fl.client.start_client(
+                server_address=args.server_address, client=client.to_client()
+            )
+            client.round += 1
         except Exception as e:
             # traceback.print_exception(type(e), e, e.__traceback__, file=sys.stderr)
             print(f"Error: {type(e)}, Couldn't run client. Retrying in 5 seconds...")

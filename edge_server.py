@@ -7,6 +7,8 @@ import numpy as np
 import multiprocessing
 import argparse
 from logger import Logger
+from models.lenet import Net
+from utils import load_datasets, set_parameters, test
 
 parser = argparse.ArgumentParser(description="Start a Flower Edge Server.")
 parser.add_argument(
@@ -28,7 +30,8 @@ args = parser.parse_args()
 logger = Logger(
     subfolder="edge",
     file_path=f"{args.name}.log",
-    headers=["round", "aggregated_loss", "aggregated_accuracy"],
+    headers=["round", "loss", "accuracy"],
+    init_file=False,
 )
 
 
@@ -61,10 +64,10 @@ class EdgeStrategy(fl.server.strategy.FedAvg):
 
         accuracies = [r.metrics["accuracy"] * r.num_examples for _, r in results]
         examples = [r.num_examples for _, r in results]
-        print(list(zip(accuracies, examples)))
+        # print(list(zip(accuracies, examples)))
         aggregated_accuracy = sum(accuracies) / sum(examples)
         self.shared_state["num_examples"] = sum(examples)
-        print(f"[Edge Server] Number of examples: {self.shared_state['num_examples']}")
+        # print(f"[Edge Server] Number of examples: {self.shared_state['num_examples']}")
         self.shared_state["aggregated_accuracy"] = aggregated_accuracy
         print(
             f"[Edge Server] Round {server_round} accuracy aggregated from client results: {aggregated_accuracy}"
@@ -124,24 +127,34 @@ def run_edge_as_client(shared_state):
                 return default, 1, {}
 
         def evaluate(self, parameters, config):
-            agg_loss = self.shared_state.get("aggregated_loss")
-            agg_accuracy = self.shared_state.get("aggregated_accuracy")
             num_examples = self.shared_state.get("num_examples")
 
-            print(
-                f"[Edge Client {args.name}] Received aggregated loss: {agg_loss} and accuracy: {agg_accuracy}"
-            )
+            if config["round"] == 0:
+                print("Skipping evaluation for round 0")
+                return super().evaluate(parameters, config)
+
+            print(f"[Edge Client] Evaluate round {config['round']}")
+            net = Net()
+            # print(parameters_to_ndarrays(parameters)[0][0][0][0])
+            set_parameters(net, parameters)
+            _, _, testloader = load_datasets()  # full dataset for evaluation
+            loss, accuracy = test(net, testloader)
             logger.log(
                 {
                     "round": config["round"],
-                    "aggregated_loss": agg_loss,
-                    "aggregated_accuracy": agg_accuracy,
+                    "loss": loss,
+                    "accuracy": accuracy,
                 }
             )
+
+            print(
+                f"[Edge Server] Evaluate Round {config['round']}: Loss = {loss}, Accuracy = {accuracy}"
+            )
+
             return (
-                float(agg_loss),
+                float(loss),
                 num_examples,
-                {"accuracy": agg_accuracy},
+                {"accuracy": accuracy},
             )
 
     print(f"[Edge Client {args.name}] Connecting to central server {args.server}")
@@ -151,6 +164,7 @@ def run_edge_as_client(shared_state):
 
 
 if __name__ == "__main__":
+    logger._init_file()
     multiprocessing.set_start_method("spawn", force=True)
     manager = multiprocessing.Manager()
     shared_state = manager.dict()

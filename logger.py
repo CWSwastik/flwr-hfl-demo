@@ -29,7 +29,7 @@ lib_logger.addHandler(handler)
 
 
 class Logger:
-    def __init__(self, subfolder, file_path, headers):
+    def __init__(self, subfolder, file_path, headers, init_file=True):
         script_dir = Path(__file__).resolve().parent
         logs_dir = script_dir / "logs" / subfolder
         logs_dir.mkdir(parents=True, exist_ok=True)
@@ -39,7 +39,8 @@ class Logger:
         if headers[0].lower() != "timestamp":
             headers.insert(0, "timestamp")
         self.headers = headers
-        self._init_file()
+        if init_file:
+            self._init_file()
 
     def _init_file(self):
         # if not self.file_path.exists():
