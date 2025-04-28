@@ -67,7 +67,7 @@ def train(net, trainloader, epochs: int, verbose=False):
     """Train the network on the training set."""
     net.to(DEVICE)
     criterion = torch.nn.CrossEntropyLoss()
-    optimizer = torch.optim.Adam(net.parameters(), lr=1e-4)
+    optimizer = torch.optim.Adam(net.parameters(), lr=5 * 1e-4)
     net.train()
     losses = []
     accuracies = []

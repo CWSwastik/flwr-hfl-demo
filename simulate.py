@@ -153,7 +153,7 @@ def spawn_processes():
             print(f"Starting process {name} with command: {cmd}")
             if kind == "server":
                 # give server time to initialize
-                time.sleep(20)
+                time.sleep(30)
 
         while procs:
             for name, p in procs[:]:
