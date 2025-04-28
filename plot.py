@@ -142,7 +142,7 @@ for idx, (client_id, train_summary, val_summary, test_summary) in enumerate(summ
     val_dist = val_summary["label_distribution"]
     sorted_val = sorted(val_dist.items(), key=lambda x: int(x[0]))
     labels, counts = zip(*sorted_val)
-    ax.bar(labels, counts)
+    ax.bar(labels, counts, color="orange")
     ax.set_title(f"{client_id} Validation Distribution")
     ax.set_xlabel("Label")
     ax.set_ylabel("Size")
@@ -152,7 +152,7 @@ for idx, (client_id, train_summary, val_summary, test_summary) in enumerate(summ
     test_dist = test_summary["label_distribution"]
     sorted_test = sorted(test_dist.items(), key=lambda x: int(x[0]))
     labels, counts = zip(*sorted_test)
-    ax.bar(labels, counts)
+    ax.bar(labels, counts, color="green")
     ax.set_title(f"{client_id} Test Distribution")
     ax.set_xlabel("Label")
     ax.set_ylabel("Size")
