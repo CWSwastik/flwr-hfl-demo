@@ -14,8 +14,8 @@ from flwr_datasets import FederatedDataset
 from flwr_datasets.partitioner import DirichletPartitioner, IidPartitioner
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-print(f"Training on {DEVICE}")
-print(f"Flower {flwr.__version__} / PyTorch {torch.__version__}")
+# print(f"Training on {DEVICE}")
+# print(f"Flower {flwr.__version__} / PyTorch {torch.__version__}")
 
 from config import (
     NUM_CLIENTS,
@@ -134,17 +134,22 @@ def get_parameters(net) -> List[np.ndarray]:
 
 
 def get_dataloader_summary(dataloader):
-    from collections import Counter
+    dataset = dataloader.dataset
 
+    # pull labels out correctly
     labels = []
-    for _, y in dataloader:  # y is a Tensor or list of labels
-        if hasattr(y, "tolist"):
-            labels.extend(y.tolist())
+    for sample in dataset:
+        # if it's a dict with a "label" key
+        if isinstance(sample, dict) and "label" in sample:
+            labels.append(sample["label"])
+        # else if it’s a tuple (x, y)
         else:
-            labels.extend(y)
+            _, y = sample
+            labels.append(y)
+
     num_items = len(labels)
     counts = Counter(labels)
-    dist = {cls: cnt / num_items for cls, cnt in counts.items()}
+    # dist = {cls: cnt / num_items for cls, cnt in counts.items()}
 
-    print("raw counts:", dict(counts))
-    return {"label_distribution": dist, "num_items": num_items}
+    # print("raw counts:", dict(counts))
+    return {"label_distribution": counts, "num_items": num_items}

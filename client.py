@@ -1,3 +1,4 @@
+import json
 import flwr as fl
 import numpy as np
 import time
@@ -96,11 +97,32 @@ def create_client(partition_id, model) -> fl.client.Client:
     model_module = importlib.import_module(f"models.{model}")
     net = model_module.Net().to(DEVICE)
 
-    trainloader, valloader, _ = load_datasets(partition_id=partition_id)
+    trainloader, valloader, testloader = load_datasets(partition_id=partition_id)
     print("Trainloader size:", len(trainloader.dataset))
     print("Valloader size:", len(valloader.dataset))
+    print("Testloader size:", len(testloader.dataset))
     print("Trainloader summary:", get_dataloader_summary(trainloader))
     print("Valloader summary:", get_dataloader_summary(valloader))
+    print("Testloader summary:", get_dataloader_summary(testloader))
+
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    with open(
+        os.path.join(
+            current_dir,
+            "logs",
+            "clients",
+            f"{args.name}_{args.partition_id}_data_dist.json",
+        ),
+        "w",
+    ) as f:
+        json.dump(
+            {
+                "trainloader": get_dataloader_summary(trainloader),
+                "valloader": get_dataloader_summary(valloader),
+                "testloader": get_dataloader_summary(testloader),
+            },
+            f,
+        )
 
     return FlowerClient(net, trainloader, valloader)
 

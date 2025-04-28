@@ -85,5 +85,81 @@ axs[2][1].set_ylabel("Accuracy")
 axs[2][1].grid(True)
 axs[2][1].legend()
 
-# Show all plots
-plt.savefig(os.path.join(current_dir, "plot.png"))
+os.makedirs(os.path.join(current_dir, "plots"), exist_ok=True)
+plt.savefig(os.path.join(current_dir, "plots", "accuracy_loss_vs_rounds.png"))
+
+
+### Load dataset and display partitions
+
+from config import NUM_CLIENTS
+import json
+
+
+# Load data and prepare summaries
+summaries = []
+for client_id in range(NUM_CLIENTS):
+    client_name = f"Client{client_id+1}"
+    # Match file pattern: logs/clients/{client_name}_{partition_id}_data_dist.json
+    pattern = os.path.join(
+        current_dir, "logs", "clients", f"{client_name}_*_data_dist.json"
+    )
+    matching_files = glob.glob(pattern)
+    if not matching_files:
+        continue  # or handle missing file
+
+    # Assuming one matching file per client
+    file_path = matching_files[0]
+    with open(file_path, "r") as f:
+        data = json.load(f)
+
+    train_summary = data["trainloader"]
+    val_summary = data["valloader"]
+    test_summary = data["testloader"]
+
+    summaries.append((client_name, train_summary, val_summary, test_summary))
+
+# Set up one big figure
+fig, axs = plt.subplots(NUM_CLIENTS, 3, figsize=(15, 5 * NUM_CLIENTS))
+fig.tight_layout(pad=5.0)
+
+# If only 1 client, axs is not 2D; fix it
+if NUM_CLIENTS == 1:
+    axs = axs.reshape(1, 3)
+
+for idx, (client_id, train_summary, val_summary, test_summary) in enumerate(summaries):
+    # Train
+    ax = axs[idx, 0]
+    train_dist = train_summary["label_distribution"]
+    sorted_train = sorted(train_dist.items(), key=lambda x: int(x[0]))
+    labels, counts = zip(*sorted_train)
+    ax.bar(labels, counts)
+    ax.set_title(f"{client_id} Train Distribution")
+    ax.set_xlabel("Label")
+    ax.set_ylabel("Size")
+
+    # Validation
+    ax = axs[idx, 1]
+    val_dist = val_summary["label_distribution"]
+    sorted_val = sorted(val_dist.items(), key=lambda x: int(x[0]))
+    labels, counts = zip(*sorted_val)
+    ax.bar(labels, counts)
+    ax.set_title(f"{client_id} Validation Distribution")
+    ax.set_xlabel("Label")
+    ax.set_ylabel("Size")
+
+    # Test
+    ax = axs[idx, 2]
+    test_dist = test_summary["label_distribution"]
+    sorted_test = sorted(test_dist.items(), key=lambda x: int(x[0]))
+    labels, counts = zip(*sorted_test)
+    ax.bar(labels, counts)
+    ax.set_title(f"{client_id} Test Distribution")
+    ax.set_xlabel("Label")
+    ax.set_ylabel("Size")
+
+# Adjust layout
+plt.tight_layout()
+
+output_path = os.path.join(current_dir, "plots", "data_distribution.png")
+plt.savefig(output_path)
+plt.close()
