@@ -17,7 +17,8 @@ fig, axs = plt.subplots(
 fig.tight_layout(pad=5.0)
 
 # Plot for Central Server
-central_log = "./logs/central/central_server.log"
+current_dir = os.path.dirname(os.path.abspath(__file__))
+central_log = os.path.join(current_dir, "logs", "central", "central_server.log")
 central_df = pd.read_csv(central_log)
 axs[0][0].set_title("Central Server: Loss vs Round")
 axs[0][1].set_title("Central Server: Accuracy vs Round")
@@ -32,7 +33,7 @@ axs[0][1].grid(True)
 axs[0][1].legend()
 
 # Plot for Edges
-edge_logs = glob.glob("./logs/edge/*.log")
+edge_logs = glob.glob(os.path.join(current_dir, "logs", "edge", "*.log"))
 axs[1][0].set_title("Edges: Loss vs Round")
 axs[1][1].set_title("Edges: Accuracy vs Round")
 for log_file in edge_logs:
@@ -49,7 +50,7 @@ axs[1][1].grid(True)
 axs[1][1].legend()
 
 # Plot for Clients
-client_logs = glob.glob("./logs/clients/*.log")
+client_logs = glob.glob(os.path.join(current_dir, "logs", "clients", "*.log"))
 clients = {}
 
 # Group client train and test files
@@ -85,4 +86,5 @@ axs[2][1].grid(True)
 axs[2][1].legend()
 
 # Show all plots
-plt.show()
+# plt.show()
+plt.savefig("logs/plots.png")

@@ -133,17 +133,18 @@ def get_parameters(net) -> List[np.ndarray]:
     return [val.cpu().numpy() for _, val in net.state_dict().items()]
 
 
-def get_dataset_summary(dataloader):
-    try:
-        dataset = dataloader.dataset
-        num_items = len(dataset)
-        class_distrb = dict(Counter(y for _, (x, y) in enumerate(dataset)))
-        print(f"class distribution: {class_distrb}")
-        for i, v in class_distrb.items():
-            class_distrb[i] = v / num_items
-        data_summary = {"label_distribution": class_distrb, "num_items": num_items}
+def get_dataloader_summary(dataloader):
+    from collections import Counter
 
-        return data_summary
+    labels = []
+    for _, y in dataloader:  # y is a Tensor or list of labels
+        if hasattr(y, "tolist"):
+            labels.extend(y.tolist())
+        else:
+            labels.extend(y)
+    num_items = len(labels)
+    counts = Counter(labels)
+    dist = {cls: cnt / num_items for cls, cnt in counts.items()}
 
-    except Exception as e:
-        print("get_data_summary:: Exception - ", e)
+    print("raw counts:", dict(counts))
+    return {"label_distribution": dist, "num_items": num_items}

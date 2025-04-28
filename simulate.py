@@ -5,6 +5,7 @@ import shutil
 import platform
 import time
 import socket
+from config import TOPOLOGY_FILE
 
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 
@@ -25,7 +26,7 @@ def get_free_port():
 
 
 def spawn_processes():
-    topo_file = get_abs_path("topologies/topo-new.yml")
+    topo_file = get_abs_path(f"topologies/{TOPOLOGY_FILE}")
 
     if not os.path.exists(topo_file):
         print(f"❌ Error: topo.yml not found at {topo_file}")

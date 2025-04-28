@@ -10,6 +10,7 @@ from utils import (
     train,
     test,
     DEVICE,
+    get_dataset_summary,
 )
 from config import NUM_ROUNDS
 
@@ -98,6 +99,9 @@ def create_client(partition_id, model) -> fl.client.Client:
     trainloader, valloader, _ = load_datasets(partition_id=partition_id)
     print("Trainloader size:", len(trainloader.dataset))
     print("Valloader size:", len(valloader.dataset))
+    print("Trainloader summary:", get_dataset_summary(trainloader))
+    print("Valloader summary:", get_dataset_summary(valloader))
+
     return FlowerClient(net, trainloader, valloader)
 
 
