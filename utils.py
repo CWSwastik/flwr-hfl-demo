@@ -1,4 +1,4 @@
-from collections import OrderedDict
+from collections import Counter, OrderedDict
 from typing import List, Tuple
 
 import numpy as np
@@ -11,15 +11,19 @@ from torch.utils.data import DataLoader
 import flwr
 from typing import Optional
 from flwr_datasets import FederatedDataset
-from flwr_datasets.partitioner import DirichletPartitioner
+from flwr_datasets.partitioner import DirichletPartitioner, IidPartitioner
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 print(f"Training on {DEVICE}")
 print(f"Flower {flwr.__version__} / PyTorch {torch.__version__}")
 
-from config import NUM_CLIENTS
-
-BATCH_SIZE = 32
+from config import (
+    NUM_CLIENTS,
+    TRAINING_LEARNING_RATE,
+    BATCH_SIZE,
+    PARTITIONER,
+    DIRICHLET_ALPHA,
+)
 
 
 def load_datasets(partition_id: Optional[int] = None):
@@ -31,12 +35,17 @@ def load_datasets(partition_id: Optional[int] = None):
         num_partitions = NUM_CLIENTS
         pid = partition_id
 
-    partitioner = DirichletPartitioner(
-        num_partitions=num_partitions,
-        partition_by="label",
-        alpha=0.5,
-        self_balancing=True,
-    )
+    if PARTITIONER == "iid":
+        partitioner = IidPartitioner(
+            num_partitions=num_partitions,
+        )
+    else:
+        partitioner = DirichletPartitioner(
+            num_partitions=num_partitions,
+            partition_by="label",
+            alpha=DIRICHLET_ALPHA,  # 0.9
+            self_balancing=True,
+        )
     fds = FederatedDataset(dataset="cifar10", partitioners={"train": partitioner})
     partition = fds.load_partition(pid)
     # Divide data on each node: 80% train, 20% test
@@ -67,7 +76,7 @@ def train(net, trainloader, epochs: int, verbose=False):
     """Train the network on the training set."""
     net.to(DEVICE)
     criterion = torch.nn.CrossEntropyLoss()
-    optimizer = torch.optim.Adam(net.parameters(), lr=5 * 1e-4)
+    optimizer = torch.optim.Adam(net.parameters(), lr=TRAINING_LEARNING_RATE)
     net.train()
     losses = []
     accuracies = []
@@ -122,3 +131,19 @@ def set_parameters(net, parameters: List[np.ndarray]):
 
 def get_parameters(net) -> List[np.ndarray]:
     return [val.cpu().numpy() for _, val in net.state_dict().items()]
+
+
+def get_dataset_summary(dataloader):
+    try:
+        dataset = dataloader.dataset
+        num_items = len(dataset)
+        class_distrb = dict(Counter(y for _, (x, y) in enumerate(dataset)))
+        print(f"class distribution: {class_distrb}")
+        for i, v in class_distrb.items():
+            class_distrb[i] = v / num_items
+        data_summary = {"label_distribution": class_distrb, "num_items": num_items}
+
+        return data_summary
+
+    except Exception as e:
+        print("get_data_summary:: Exception - ", e)
