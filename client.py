@@ -13,12 +13,22 @@ from utils import (
     DEVICE,
     get_dataloader_summary,
 )
-from config import NUM_ROUNDS
+from config import (
+    NUM_ROUNDS,
+    TRAINING_LEARNING_RATE,
+    TRAINING_WEIGHT_DECAY,
+    TRAINING_SCHEDULER_GAMMA,
+    TRAINING_SCHEDULER_STEP_SIZE,
+)
 
 import importlib
 from logger import Logger
 import os
 import sys, traceback
+
+
+from torch.optim import Adam
+from torch.optim.lr_scheduler import StepLR
 
 
 parser = argparse.ArgumentParser(description="Start a Flower client.")
@@ -55,6 +65,18 @@ class FlowerClient(fl.client.NumPyClient):
         self.valloader = valloader
         self.round = 0
 
+        self.optimizer = Adam(
+            self.net.parameters(),
+            lr=TRAINING_LEARNING_RATE,
+            weight_decay=TRAINING_WEIGHT_DECAY,
+        )
+
+        self.scheduler = StepLR(
+            self.optimizer,
+            step_size=TRAINING_SCHEDULER_STEP_SIZE,
+            gamma=TRAINING_SCHEDULER_GAMMA,
+        )
+
     def get_parameters(self, config):
         return get_parameters(self.net)
 
@@ -66,7 +88,7 @@ class FlowerClient(fl.client.NumPyClient):
         else:
             print("Received initial model from server, starting training...")
 
-        losses, accuracies = train(self.net, self.trainloader, epochs=1)
+        losses, accuracies = train(self.net, self.trainloader, self.optimizer, epochs=1)
         train_logger.log(
             {
                 "round": self.round,

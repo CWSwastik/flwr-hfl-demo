@@ -72,11 +72,10 @@ def load_datasets(partition_id: Optional[int] = None):
     return trainloader, valloader, testloader
 
 
-def train(net, trainloader, epochs: int, verbose=False):
+def train(net, trainloader, optimizer: torch.optim.Adam, epochs: int, verbose=False):
     """Train the network on the training set."""
     net.to(DEVICE)
     criterion = torch.nn.CrossEntropyLoss()
-    optimizer = torch.optim.Adam(net.parameters(), lr=TRAINING_LEARNING_RATE)
     net.train()
     losses = []
     accuracies = []
