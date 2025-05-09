@@ -29,6 +29,7 @@ class FedAvgWithLogging(fl.server.strategy.FedAvg):
         super().__init__(
             min_fit_clients=2,
             min_available_clients=2,
+            on_fit_config_fn=lambda rnd: {"round": rnd},
             on_evaluate_config_fn=lambda rnd: {"round": rnd},
         )
 

@@ -36,9 +36,10 @@ logger = Logger(
 
 
 class EdgeStrategy(fl.server.strategy.FedAvg):
-    def __init__(self, shared_state, **kwargs):
+    def __init__(self, shared_state, round, **kwargs):
         super().__init__(**kwargs)
         self.shared_state = shared_state
+        self.round = round
 
     def aggregate_fit(self, rnd, results, failures):
         print(f"[Edge Server {args.name}] Aggregating fit results at round {rnd}.")
@@ -75,10 +76,38 @@ class EdgeStrategy(fl.server.strategy.FedAvg):
 
         return float(aggregated_loss), {"accuracy": float(aggregated_accuracy)}
 
+    def evaluate(self, server_round, parameters):
+        # print(f"Server round: {server_round}", "But real round:", self.round)
 
-def run_edge_server(shared_state, params):
+        if server_round == 0:
+            # Skip evaluation for round 0
+            return super().evaluate(server_round, parameters)
+
+        server_round = self.round
+        print(f"[Edge Server] Evaluate round {server_round}")
+        net = Net()
+        # print(parameters_to_ndarrays(parameters)[0][0][0][0])
+        set_parameters(net, parameters_to_ndarrays(parameters))
+        _, _, testloader = load_datasets()  # full dataset for evaluation
+        loss, accuracy = test(net, testloader)
+        logger.log(
+            {
+                "round": server_round,
+                "loss": loss,
+                "accuracy": accuracy,
+            }
+        )
+
+        print(
+            f"[Edge Server] Evaluate Round {server_round}: Loss = {loss}, Accuracy = {accuracy}"
+        )
+        return super().evaluate(server_round, parameters)
+
+
+def run_edge_server(shared_state, params, round):
     strategy = EdgeStrategy(
         shared_state,
+        round,
         min_fit_clients=2,
         min_available_clients=2,
         initial_parameters=ndarrays_to_parameters(params),
@@ -110,7 +139,7 @@ def run_edge_as_client(shared_state):
             # Start the edge server process for local aggregation
             server_process = multiprocessing.Process(
                 target=run_edge_server,
-                args=(self.shared_state, parameters),
+                args=(self.shared_state, parameters, config["round"]),
             )
             server_process.start()
             server_process.join()
@@ -126,36 +155,36 @@ def run_edge_as_client(shared_state):
                 default = [np.array([0.0, 0.0, 0.0])]
                 return default, 1, {}
 
-        def evaluate(self, parameters, config):
-            num_examples = self.shared_state.get("num_examples")
+        # def evaluate(self, parameters, config):
+        #     num_examples = self.shared_state.get("num_examples")
 
-            if config["round"] == 0:
-                print("Skipping evaluation for round 0")
-                return super().evaluate(parameters, config)
+        #     if config["round"] == 0:
+        #         print("Skipping evaluation for round 0")
+        #         return super().evaluate(parameters, config)
 
-            print(f"[Edge Client] Evaluate round {config['round']}")
-            net = Net()
-            # print(parameters_to_ndarrays(parameters)[0][0][0][0])
-            set_parameters(net, parameters)
-            _, _, testloader = load_datasets()  # full dataset for evaluation
-            loss, accuracy = test(net, testloader)
-            logger.log(
-                {
-                    "round": config["round"],
-                    "loss": loss,
-                    "accuracy": accuracy,
-                }
-            )
+        #     print(f"[Edge Client] Evaluate round {config['round']}")
+        #     net = Net()
+        #     # print(parameters_to_ndarrays(parameters)[0][0][0][0])
+        #     set_parameters(net, parameters)
+        #     _, _, testloader = load_datasets()  # full dataset for evaluation
+        #     loss, accuracy = test(net, testloader)
+        #     logger.log(
+        #         {
+        #             "round": config["round"],
+        #             "loss": loss,
+        #             "accuracy": accuracy,
+        #         }
+        #     )
 
-            print(
-                f"[Edge Server] Evaluate Round {config['round']}: Loss = {loss}, Accuracy = {accuracy}"
-            )
+        #     print(
+        #         f"[Edge Server] Evaluate Round {config['round']}: Loss = {loss}, Accuracy = {accuracy}"
+        #     )
 
-            return (
-                float(loss),
-                num_examples,
-                {"accuracy": accuracy},
-            )
+        #     return (
+        #         float(loss),
+        #         num_examples,
+        #         {"accuracy": accuracy},
+        #     )
 
     print(f"[Edge Client {args.name}] Connecting to central server {args.server}")
     fl.client.start_client(
