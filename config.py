@@ -2,7 +2,7 @@ NUM_ROUNDS = 250
 TOPOLOGY_FILE = "topo.yml"
 
 NUM_CLIENTS = 4
-BATCH_SIZE = 32
+BATCH_SIZE = 16
 PARTITIONER = "iid"  # "iid" or "dirichlet"
 DIRICHLET_ALPHA = 0.5
 
