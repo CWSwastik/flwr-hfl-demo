@@ -47,6 +47,8 @@ class EdgeStrategy(fl.server.strategy.FedAvg):
         aggregated_parameters = super().aggregate_fit(rnd, results, failures)
         if aggregated_parameters is not None:
             self.shared_state["aggregated_model"] = aggregated_parameters
+            examples = [r.num_examples for _, r in results]
+            self.shared_state["num_examples"] = sum(examples)
             # print(parameters_to_ndarrays(aggregated_parameters[0])[0][0][0][0])
             print(f"[Edge Server] Aggregated model at round {rnd}.")
         return aggregated_parameters
@@ -68,7 +70,7 @@ class EdgeStrategy(fl.server.strategy.FedAvg):
         examples = [r.num_examples for _, r in results]
         # print(list(zip(accuracies, examples)))
         aggregated_accuracy = sum(accuracies) / sum(examples)
-        self.shared_state["num_examples"] = sum(examples)
+
         # print(f"[Edge Server] Number of examples: {self.shared_state['num_examples']}")
         self.shared_state["aggregated_accuracy"] = aggregated_accuracy
         print(
@@ -203,7 +205,7 @@ if __name__ == "__main__":
     shared_state = manager.dict()
     shared_state["aggregated_model"] = None
     shared_state["aggregated_eval"] = None
-    shared_state["num_examples"] = 0
+    shared_state["num_examples"] = 1
 
     client_process = multiprocessing.Process(
         target=run_edge_as_client, args=(shared_state,)
