@@ -9,22 +9,10 @@ class Net(nn.Module):
         # Load the VGG11 architecture without pretrained weights
         self.base_model = vgg11()
 
-        # Modify the first conv layer if needed (optional, but here it's left unchanged as 3x3 works fine)
-        # self.base_model.features[0] = nn.Conv2d(3, 64, kernel_size=3, padding=1)
-
-        # Adjust classifier to output 10 classes for CIFAR-10
+        self.base_model.avgpool = nn.AdaptiveAvgPool2d((1, 1))  # Keep spatial dims
         self.base_model.classifier = nn.Sequential(
-            nn.Linear(512, 4096),
-            nn.ReLU(True),
-            nn.Dropout(),
-            nn.Linear(4096, 4096),
-            nn.ReLU(True),
-            nn.Dropout(),
-            nn.Linear(4096, num_classes),
+            nn.Linear(512, 256), nn.ReLU(), nn.Dropout(0.3), nn.Linear(256, num_classes)
         )
-
-        # Remove AdaptiveAvgPool since CIFAR-10 images are smaller and result in 1x1 feature maps after pooling
-        self.base_model.avgpool = nn.Identity()
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.base_model(x)
