@@ -1,6 +1,8 @@
 NUM_ROUNDS = 250
 TOPOLOGY_FILE = "topo.yml"
 
+MODEL = "vgg"  # vgg, lenet
+
 NUM_CLIENTS = 4
 BATCH_SIZE = 16
 PARTITIONER = "iid"  # "iid" or "dirichlet"

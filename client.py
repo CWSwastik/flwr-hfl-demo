@@ -15,6 +15,7 @@ from utils import (
 )
 from config import (
     NUM_ROUNDS,
+    MODEL,
     TRAINING_LEARNING_RATE,
     TRAINING_WEIGHT_DECAY,
     TRAINING_SCHEDULER_GAMMA,
@@ -38,22 +39,19 @@ parser.add_argument(
 )
 parser.add_argument("--partition_id", type=int, default=0, help="Partition ID")
 parser.add_argument(
-    "--model", type=str, default="lenet", help="Model name (default: lenet)"
-)
-parser.add_argument(
     "--name", type=str, default="client", help="Client name (default: client)"
 )
 args = parser.parse_args()
 
 test_logger = Logger(
     subfolder="clients",
-    file_path=f"{args.name}_{args.model}_test.log",
+    file_path=f"{args.name}_{MODEL}_test.log",
     headers=["round", "loss", "accuracy", "data_samples"],
 )
 
 train_logger = Logger(
     subfolder="clients",
-    file_path=f"{args.name}_{args.model}_train.log",
+    file_path=f"{args.name}_{MODEL}_train.log",
     headers=["round", "loss", "accuracy", "data_samples"],
 )
 
@@ -153,7 +151,7 @@ if __name__ == "__main__":
     print(
         f"Starting client {args.name} with partition_id {args.partition_id} and connecting to {args.server_address}"
     )
-    client = create_client(args.partition_id, model=args.model)
+    client = create_client(args.partition_id, model=MODEL)
     while client.round <= NUM_ROUNDS:
         try:
             print(f"Starting client {args.name} for Round {client.round}")

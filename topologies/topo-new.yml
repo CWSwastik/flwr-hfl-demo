@@ -13,13 +13,11 @@ Client1:
   kind: client
   host: Edge1
   partition_id: 0
-  model: lenet
 
 Client2:
   kind: client
   host: Edge1
   partition_id: 1
-  model: lenet
 
 Edge2:
   kind: edge
@@ -32,10 +30,8 @@ Client3:
   kind: client
   host: Edge2
   partition_id: 2
-  model: lenet
 
 Client4:
   kind: client
   host: Edge2
   partition_id: 3
-  model: lenet

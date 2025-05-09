@@ -112,7 +112,7 @@ def spawn_processes():
                 cmd = (
                     f'py "{get_abs_path("client.py")}" '
                     f'{cfg["host"]}:{cfg["port"]} --partition_id {cfg["partition_id"]} '
-                    f'--model {cfg["model"]} --name {name}'
+                    f"--name {name}"
                 )
             else:
                 continue
@@ -144,7 +144,7 @@ def spawn_processes():
                 cmd = (
                     f'python3 "{get_abs_path("client.py")}" '
                     f'{cfg["host"]}:{cfg["port"]} --partition_id {cfg["partition_id"]} '
-                    f'--model {cfg["model"]} --name {name}'
+                    f"--name {name}"
                 )
             else:
                 continue

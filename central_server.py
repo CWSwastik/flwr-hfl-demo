@@ -1,11 +1,12 @@
+import importlib
 import flwr as fl
 from flwr.server import ServerConfig
 import argparse
 import matplotlib.pyplot as plt
-from config import NUM_ROUNDS
+from config import NUM_ROUNDS, MODEL
 from logger import Logger
 
-from models.lenet import Net
+
 from utils import set_parameters, test, load_datasets
 from flwr.common import parameters_to_ndarrays
 
@@ -39,7 +40,10 @@ class FedAvgWithLogging(fl.server.strategy.FedAvg):
             return super().evaluate(server_round, parameters)
 
         print(f"[Central Server] Evaluate round {server_round}")
-        net = Net()
+
+        model_module = importlib.import_module(f"models.{MODEL}")
+        net = model_module.Net()
+
         # print(parameters_to_ndarrays(parameters)[0][0][0][0])
         set_parameters(net, parameters_to_ndarrays(parameters))
         _, _, testloader = load_datasets()  # full dataset for evaluation

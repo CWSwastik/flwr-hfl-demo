@@ -17,14 +17,12 @@ Client1:
   host: localhost
   port: 5001
   partition_id: 0
-  model: vgg
 
 Client2:
   kind: client
   host: localhost
   port: 5001
   partition_id: 1
-  model: vgg
 
 Edge2:
   kind: edge
@@ -40,11 +38,9 @@ Client3:
   host: localhost
   port: 5002
   partition_id: 2
-  model: vgg
 
 Client4:
   kind: client
   host: localhost
   port: 5002
   partition_id: 3
-  model: vgg

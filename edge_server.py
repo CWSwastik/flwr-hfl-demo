@@ -1,3 +1,4 @@
+import importlib
 import sys
 import traceback
 import flwr as fl
@@ -7,8 +8,8 @@ import numpy as np
 import multiprocessing
 import argparse
 from logger import Logger
-from models.lenet import Net
 from utils import load_datasets, set_parameters, test
+from config import MODEL
 
 parser = argparse.ArgumentParser(description="Start a Flower Edge Server.")
 parser.add_argument(
@@ -85,7 +86,10 @@ class EdgeStrategy(fl.server.strategy.FedAvg):
 
         server_round = self.round
         print(f"[Edge Server] Evaluate round {server_round}")
-        net = Net()
+
+        model_module = importlib.import_module(f"models.{MODEL}")
+        net = model_module.Net()
+
         # print(parameters_to_ndarrays(parameters)[0][0][0][0])
         set_parameters(net, parameters_to_ndarrays(parameters))
         _, _, testloader = load_datasets()  # full dataset for evaluation
