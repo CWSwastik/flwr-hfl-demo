@@ -1,0 +1,118 @@
+Coordinator:
+  kind: server
+  host: localhost
+  port: 8000
+
+Edge1:
+  kind: edge
+  server:
+    host: localhost
+    port: 8000
+  client:
+    host: localhost
+    port: 8001
+
+Client1a:
+  kind: client
+  host: localhost
+  port: 8001
+  partition_id: 0
+
+Client2a:
+  kind: client
+  host: localhost
+  port: 8001
+  partition_id: 1
+
+Client1b:
+  kind: client
+  host: localhost
+  port: 8001
+  partition_id: 2
+
+Client2b:
+  kind: client
+  host: localhost
+  port: 8001
+  partition_id: 3
+
+Client1c:
+  kind: client
+  host: localhost
+  port: 8001
+  partition_id: 4
+
+Client2c:
+  kind: client
+  host: localhost
+  port: 8001
+  partition_id: 5
+
+Client1d:
+  kind: client
+  host: localhost
+  port: 8001
+  partition_id: 6
+
+Client2d:
+  kind: client
+  host: localhost
+  port: 8001
+  partition_id: 7
+
+Edge2:
+  kind: edge
+  server:
+    host: localhost
+    port: 8000
+  client:
+    host: localhost
+    port: 8002
+
+Client3a:
+  kind: client
+  host: localhost
+  port: 8002
+  partition_id: 8
+
+Client4a:
+  kind: client
+  host: localhost
+  port: 8002
+  partition_id: 9
+
+Client3b:
+  kind: client
+  host: localhost
+  port: 8002
+  partition_id: 10
+
+Client4b:
+  kind: client
+  host: localhost
+  port: 8002
+  partition_id: 11
+
+Client3c:
+  kind: client
+  host: localhost
+  port: 8002
+  partition_id: 12
+
+Client4c:
+  kind: client
+  host: localhost
+  port: 8002
+  partition_id: 13
+
+Client3d:
+  kind: client
+  host: localhost
+  port: 8002
+  partition_id: 14
+
+Client4d:
+  kind: client
+  host: localhost
+  port: 8002
+  partition_id: 15

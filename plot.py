@@ -97,18 +97,12 @@ import json
 
 # Load data and prepare summaries
 summaries = []
-for client_id in range(NUM_CLIENTS):
-    client_name = f"Client{client_id+1}"
-    # Match file pattern: logs/clients/{client_name}_{partition_id}_data_dist.json
-    pattern = os.path.join(
-        current_dir, "logs", "clients", f"{client_name}_*_data_dist.json"
-    )
-    matching_files = glob.glob(pattern)
-    if not matching_files:
-        continue  # or handle missing file
+pattern = os.path.join(current_dir, "logs", "clients", "Client*_data_dist.json")
+matching_files = glob.glob(pattern)
 
-    # Assuming one matching file per client
-    file_path = matching_files[0]
+for file_path in matching_files:
+    base = os.path.basename(file_path)
+    client_name = base.replace("_data_dist.json", "")
     with open(file_path, "r") as f:
         data = json.load(f)
 
