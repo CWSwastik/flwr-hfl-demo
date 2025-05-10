@@ -73,7 +73,8 @@ def load_datasets(partition_id: Optional[int] = None):
                 ]
             )
         batch["img"] = [pytorch_transforms(img) for img in imgs]
-        del batch["image"]
+        if "image" in batch:
+            del batch["image"]
         return batch
 
     # Create train/val for each partition and wrap it into DataLoader
