@@ -1,9 +1,10 @@
 NUM_ROUNDS = 250
-TOPOLOGY_FILE = "topo-8clients.yml"
+TOPOLOGY_FILE = "topo.yml"
+NUM_CLIENTS = 4
 
-MODEL = "lenet"  # vgg, lenet
+MODEL = "lenet_mnist"  # vgg, lenet_mnist, lenet_cifar10
+DATASET = "mnist"  # mnist, cifar10
 
-NUM_CLIENTS = 16
 BATCH_SIZE = 32
 PARTITIONER = "iid"  # "iid" or "dirichlet"
 DIRICHLET_ALPHA = 0.5

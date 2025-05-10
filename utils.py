@@ -23,6 +23,7 @@ from config import (
     BATCH_SIZE,
     PARTITIONER,
     DIRICHLET_ALPHA,
+    DATASET,
 )
 
 
@@ -46,19 +47,33 @@ def load_datasets(partition_id: Optional[int] = None):
             alpha=DIRICHLET_ALPHA,  # 0.9
             self_balancing=True,
         )
-    fds = FederatedDataset(dataset="cifar10", partitioners={"train": partitioner})
+
+    fds = FederatedDataset(dataset=DATASET, partitioners={"train": partitioner})
     partition = fds.load_partition(pid)
     # Divide data on each node: 80% train, 20% test
     partition_train_test = partition.train_test_split(test_size=0.2, seed=42)
-    pytorch_transforms = transforms.Compose(
-        [transforms.ToTensor(), transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))]
-    )
 
     def apply_transforms(batch):
-        # Instead of passing transforms to CIFAR10(..., transform=transform)
-        # we will use this function to dataset.with_transform(apply_transforms)
-        # The transforms object is exactly the same
-        batch["img"] = [pytorch_transforms(img) for img in batch["img"]]
+        imgs = batch.get("img", batch.get("image"))
+
+        if DATASET == "mnist":
+            pytorch_transforms = transforms.Compose(
+                [
+                    transforms.ToTensor(),
+                    transforms.Normalize((0.1307,), (0.3081,)),  # MNIST’s mean/std
+                ]
+            )
+        else:
+            pytorch_transforms = transforms.Compose(
+                [
+                    transforms.ToTensor(),
+                    transforms.Normalize(
+                        (0.5, 0.5, 0.5), (0.5, 0.5, 0.5)
+                    ),  # CIFAR10’s mean/std
+                ]
+            )
+        batch["img"] = [pytorch_transforms(img) for img in imgs]
+        del batch["image"]
         return batch
 
     # Create train/val for each partition and wrap it into DataLoader
@@ -152,3 +167,11 @@ def get_dataloader_summary(dataloader):
 
     # print("raw counts:", dict(counts))
     return {"label_distribution": counts, "num_items": num_items}
+
+
+if __name__ == "__main__":
+    # Example usage
+    trainloader, valloader, testloader = load_datasets()
+    print(get_dataloader_summary(trainloader))
+    print(get_dataloader_summary(valloader))
+    print(get_dataloader_summary(testloader))
