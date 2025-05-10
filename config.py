@@ -1,7 +1,7 @@
 NUM_ROUNDS = 250
-TOPOLOGY_FILE = "topo.yml"
+TOPOLOGY_FILE = "topo-8clients.yml"
 
-MODEL = "vgg"  # vgg, lenet
+MODEL = "lenet"  # vgg, lenet
 
 NUM_CLIENTS = 4
 BATCH_SIZE = 16
