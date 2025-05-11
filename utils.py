@@ -56,7 +56,7 @@ def load_datasets(partition_id: Optional[int] = None):
     def apply_transforms(batch):
         imgs = batch.get("img", batch.get("image"))
 
-        if DATASET == "mnist":
+        if "mnist" in DATASET:
             pytorch_transforms = transforms.Compose(
                 [
                     transforms.ToTensor(),

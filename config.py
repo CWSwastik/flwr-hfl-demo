@@ -2,8 +2,8 @@ NUM_ROUNDS = 100
 TOPOLOGY_FILE = "topo.yml"
 NUM_CLIENTS = 4
 
-MODEL = "lenet_cifar10"  # vgg, lenet_mnist, lenet_cifar10
-DATASET = "cifar10"  # mnist, cifar10
+MODEL = "lenet_mnist"  # vgg, lenet_mnist, lenet_cifar10
+DATASET = "fashion_mnist"  # mnist, cifar10, fashion_mnist
 
 BATCH_SIZE = 32
 PARTITIONER = "iid"  # "iid" or "dirichlet"
