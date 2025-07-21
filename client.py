@@ -3,6 +3,7 @@ import flwr as fl
 import numpy as np
 import time
 import argparse
+import requests
 
 from utils import (
     load_datasets,
@@ -12,6 +13,8 @@ from utils import (
     test,
     DEVICE,
     get_dataloader_summary,
+    post_to_dashboard,
+    log_to_dashboard,
 )
 from config import (
     NUM_ROUNDS,
@@ -20,6 +23,7 @@ from config import (
     TRAINING_WEIGHT_DECAY,
     TRAINING_SCHEDULER_GAMMA,
     TRAINING_SCHEDULER_STEP_SIZE,
+    DASHBOARD_SERVER_URL,
 )
 
 import importlib
@@ -41,6 +45,12 @@ parser.add_argument("--partition_id", type=int, default=0, help="Partition ID")
 parser.add_argument(
     "--name", type=str, default="client", help="Client name (default: client)"
 )
+parser.add_argument(
+    "--exp_id",
+    type=str,
+    help="The experiment ID for the dashboard",
+)
+
 args = parser.parse_args()
 
 test_logger = Logger(
@@ -96,6 +106,7 @@ class FlowerClient(fl.client.NumPyClient):
             }
         )
         # print(get_parameters(self.net)[0][0][0][0])
+
         return get_parameters(self.net), len(self.trainloader.dataset), {}
 
     def evaluate(self, parameters, config):
@@ -108,6 +119,17 @@ class FlowerClient(fl.client.NumPyClient):
                 "accuracy": accuracy,
                 "data_samples": len(self.valloader.dataset),
             }
+        )
+        log_to_dashboard(
+            args.exp_id,
+            "client",
+            {
+                "device": args.name,
+                "round": self.round,
+                "loss": loss,
+                "accuracy": accuracy,
+                "data_samples": len(self.valloader.dataset),
+            },
         )
         return float(loss), len(self.valloader.dataset), {"accuracy": float(accuracy)}
 
@@ -143,6 +165,15 @@ def create_client(partition_id, model) -> fl.client.Client:
             },
             f,
         )
+
+    url = f"{DASHBOARD_SERVER_URL}/experiment/{args.exp_id}/distribution/client"
+    dist = {
+        "trainloader": get_dataloader_summary(trainloader),
+        "valloader": get_dataloader_summary(valloader),
+        "testloader": get_dataloader_summary(testloader),
+    }
+    payload = {"device": args.name, "distribution": dist}
+    post_to_dashboard(url, payload)
 
     return FlowerClient(net, trainloader, valloader)
 

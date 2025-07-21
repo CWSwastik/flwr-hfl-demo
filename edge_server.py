@@ -8,7 +8,7 @@ import numpy as np
 import multiprocessing
 import argparse
 from logger import Logger
-from utils import load_datasets, set_parameters, test
+from utils import load_datasets, set_parameters, test, log_to_dashboard
 from config import MODEL
 
 parser = argparse.ArgumentParser(description="Start a Flower Edge Server.")
@@ -24,6 +24,11 @@ parser.add_argument(
     type=str,
     required=True,
     help="Edge Server name for logging",
+)
+parser.add_argument(
+    "--exp_id",
+    type=str,
+    help="The experiment ID for the dashboard",
 )
 
 args = parser.parse_args()
@@ -102,6 +107,18 @@ class EdgeStrategy(fl.server.strategy.FedAvg):
                 "loss": loss,
                 "accuracy": accuracy,
             }
+        )
+
+        # Log to dashboard
+        log_to_dashboard(
+            args.exp_id,
+            "edge",
+            {
+                "device": args.name,
+                "round": server_round,
+                "loss": loss,
+                "accuracy": accuracy,
+            },
         )
 
         print(

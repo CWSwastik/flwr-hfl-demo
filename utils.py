@@ -1,7 +1,8 @@
 from collections import Counter, OrderedDict
-from typing import List, Tuple
+from typing import Dict, List, Tuple
 
 import numpy as np
+import requests
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -24,6 +25,7 @@ from config import (
     PARTITIONER,
     DIRICHLET_ALPHA,
     DATASET,
+    DASHBOARD_SERVER_URL,
 )
 
 
@@ -168,6 +170,20 @@ def get_dataloader_summary(dataloader):
 
     # print("raw counts:", dict(counts))
     return {"label_distribution": counts, "num_items": num_items}
+
+
+def post_to_dashboard(url: str, payload: Dict):
+    try:
+        res = requests.post(url, json=payload)
+        if res.status_code != 200:
+            print(f"Error posting to {url}: {res.text}")
+    except Exception as e:
+        print(f"Failed to post to {url}: {e}")
+
+
+def log_to_dashboard(exp_id: str, role: str, payload: Dict):
+    url = f"{DASHBOARD_SERVER_URL}/experiment/{exp_id}/log/{role}"
+    post_to_dashboard(url, payload)
 
 
 if __name__ == "__main__":

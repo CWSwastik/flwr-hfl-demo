@@ -5,7 +5,7 @@ import argparse
 import matplotlib.pyplot as plt
 from config import NUM_ROUNDS, MODEL
 from logger import Logger
-
+from utils import log_to_dashboard
 
 from utils import set_parameters, test, load_datasets
 from flwr.common import parameters_to_ndarrays
@@ -13,6 +13,11 @@ from flwr.common import parameters_to_ndarrays
 parser = argparse.ArgumentParser(description="Start the Flower central server.")
 parser.add_argument(
     "address", help="Server address in the format host:port (e.g., 0.0.0.0:8081)"
+)
+parser.add_argument(
+    "--exp_id",
+    type=str,
+    help="The experiment ID for the dashboard",
 )
 args = parser.parse_args()
 
@@ -54,6 +59,18 @@ class FedAvgWithLogging(fl.server.strategy.FedAvg):
                 "loss": loss,
                 "accuracy": accuracy,
             }
+        )
+
+        # Log to dashboard
+        log_to_dashboard(
+            args.exp_id,
+            "central",
+            {
+                "device": "central_server",
+                "round": server_round,
+                "loss": loss,
+                "accuracy": accuracy,
+            },
         )
 
         print(

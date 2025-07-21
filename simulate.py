@@ -5,9 +5,13 @@ import shutil
 import platform
 import time
 import socket
+import requests
 from config import TOPOLOGY_FILE
+import config
+import random
 
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
+EXP_ID = f"experiment_{random.randint(1000, 9999)}"
 
 
 def get_abs_path(filename):
@@ -25,6 +29,26 @@ def get_free_port():
         return s.getsockname()[1]
 
 
+def create_experiment_on_dashboard():
+    url = f"{config.DASHBOARD_SERVER_URL}/experiment/{EXP_ID}/create"
+    metadata = {
+        "num_clients": config.NUM_CLIENTS,
+        "rounds": config.NUM_ROUNDS,
+        "averaging algorithm": "FedAvg",
+        "model": config.MODEL,
+        "dataset": config.DATASET,
+        "batch_size": config.BATCH_SIZE,
+        "topology_file": TOPOLOGY_FILE,
+        "partitioner": config.PARTITIONER,
+    }
+    try:
+        res = requests.post(url, json=metadata)
+        if res.status_code != 200:
+            print(f"Failed to create experiment: {res.text}")
+    except Exception as e:
+        print(f"Failed to create experiment: {e}")
+
+
 def spawn_processes():
     topo_file = get_abs_path(f"topologies/{TOPOLOGY_FILE}")
 
@@ -36,6 +60,8 @@ def spawn_processes():
         topology = yaml.safe_load(file)
 
     current_os = platform.system()
+
+    create_experiment_on_dashboard()
 
     # Resolve missing ports and host references
     # 1. Assign default port to coordinator/server if not specified
@@ -101,18 +127,18 @@ def spawn_processes():
         for name, cfg in sorted_topo.items():
             kind = cfg.get("kind")
             if kind == "server":
-                cmd = f'py "{get_abs_path("central_server.py")}" {cfg["host"]}:{cfg["port"]}'
+                cmd = f'py "{get_abs_path("central_server.py")}" {cfg["host"]}:{cfg["port"]} --exp_id {EXP_ID}'
             elif kind == "edge":
                 cmd = (
                     f'py "{get_abs_path("edge_server.py")}" --server '
                     f'{cfg["server"]["host"]}:{cfg["server"]["port"]} --client '
-                    f'{cfg["client"]["host"]}:{cfg["client"]["port"]} --name {name}'
+                    f'{cfg["client"]["host"]}:{cfg["client"]["port"]} --name {name} --exp_id {EXP_ID}'
                 )
             elif kind == "client":
                 cmd = (
                     f'py "{get_abs_path("client.py")}" '
                     f'{cfg["host"]}:{cfg["port"]} --partition_id {cfg["partition_id"]} '
-                    f"--name {name}"
+                    f"--name {name} --exp_id {EXP_ID}"
                 )
             else:
                 continue
@@ -133,18 +159,18 @@ def spawn_processes():
         for name, cfg in sorted_topo.items():
             kind = cfg.get("kind")
             if kind == "server":
-                cmd = f'python3 "{get_abs_path("central_server.py")}" {cfg["host"]}:{cfg["port"]}'
+                cmd = f'python3 "{get_abs_path("central_server.py")}" {cfg["host"]}:{cfg["port"]} --exp_id {EXP_ID}'
             elif kind == "edge":
                 cmd = (
                     f'python3 "{get_abs_path("edge_server.py")}" --server '
                     f'{cfg["server"]["host"]}:{cfg["server"]["port"]} '
-                    f'--client {cfg["client"]["host"]}:{cfg["client"]["port"]} --name {name}'
+                    f'--client {cfg["client"]["host"]}:{cfg["client"]["port"]} --name {name} --exp_id {EXP_ID}'
                 )
             elif kind == "client":
                 cmd = (
                     f'python3 "{get_abs_path("client.py")}" '
-                    f'{cfg["host"]}:{cfg["port"]} --partition_id {cfg["partition_id"]} '
-                    f"--name {name}"
+                    f'{cfg["host"]}:{cfg["port"]} --partition_id {cfg["partition_id"]}'
+                    f"--name {name} --exp_id {EXP_ID}"
                 )
             else:
                 continue
