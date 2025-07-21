@@ -174,7 +174,9 @@ def get_dataloader_summary(dataloader):
 
 def post_to_dashboard(url: str, payload: Dict):
     try:
-        res = requests.post(url, json=payload)
+        res = requests.post(
+            url, json=payload, headers={"ngrok-skip-browser-warning": "true"}
+        )
         if res.status_code != 200:
             print(f"Error posting to {url}: {res.text}")
     except Exception as e:
