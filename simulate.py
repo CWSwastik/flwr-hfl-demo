@@ -9,6 +9,7 @@ import requests
 from config import TOPOLOGY_FILE
 import config
 import random
+from utils import post_to_dashboard
 
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 EXP_ID = f"experiment_{random.randint(1000, 9999)}"
@@ -29,7 +30,7 @@ def get_free_port():
         return s.getsockname()[1]
 
 
-def create_experiment_on_dashboard():
+def create_experiment_on_dashboard(topology):
     url = f"{config.DASHBOARD_SERVER_URL}/experiment/{EXP_ID}/create"
     metadata = {
         "num_clients": config.NUM_CLIENTS,
@@ -41,12 +42,10 @@ def create_experiment_on_dashboard():
         "topology_file": TOPOLOGY_FILE,
         "partitioner": config.PARTITIONER,
     }
-    try:
-        res = requests.post(url, json=metadata)
-        if res.status_code != 200:
-            print(f"Failed to create experiment: {res.text}")
-    except Exception as e:
-        print(f"Failed to create experiment: {e}")
+    post_to_dashboard(url, metadata)
+
+    url = f"{config.DASHBOARD_SERVER_URL}/experiment/{EXP_ID}/topology"
+    post_to_dashboard(url, topology)
 
 
 def spawn_processes():
@@ -61,7 +60,7 @@ def spawn_processes():
 
     current_os = platform.system()
 
-    create_experiment_on_dashboard()
+    create_experiment_on_dashboard(topology)
 
     # Resolve missing ports and host references
     # 1. Assign default port to coordinator/server if not specified
