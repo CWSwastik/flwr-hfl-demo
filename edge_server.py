@@ -9,7 +9,7 @@ import multiprocessing
 import argparse
 from logger import Logger
 from utils import load_datasets, set_parameters, test, log_to_dashboard
-from config import MODEL
+from config import MODEL, MIN_CLIENTS_PER_EDGE
 
 parser = argparse.ArgumentParser(description="Start a Flower Edge Server.")
 parser.add_argument(
@@ -131,8 +131,8 @@ def run_edge_server(shared_state, params, round):
     strategy = EdgeStrategy(
         shared_state,
         round,
-        min_fit_clients=2,
-        min_available_clients=2,
+        min_fit_clients=MIN_CLIENTS_PER_EDGE,
+        min_available_clients=MIN_CLIENTS_PER_EDGE,
         initial_parameters=ndarrays_to_parameters(params),
         # on_evaluate_config_fn=lambda rnd: {"round": rnd},
     )
