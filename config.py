@@ -8,8 +8,9 @@ MODEL = "lenet_mnist"  # vgg, lenet_mnist, lenet_cifar10
 DATASET = "fashion_mnist"  # mnist, cifar10, fashion_mnist
 
 BATCH_SIZE = 32
-PARTITIONER = "iid"  # "iid" or "dirichlet"
+PARTITIONER = "pathological"  # "iid" or "dirichlet" or "pathological"
 DIRICHLET_ALPHA = 0.5
+NUM_CLASSES_PER_PARTITION = 3  # used in pathological partitioning (limit label)
 
 TRAINING_LEARNING_RATE = 5 * 1e-4
 TRAINING_WEIGHT_DECAY = 1e-4

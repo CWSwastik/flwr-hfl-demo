@@ -12,7 +12,11 @@ from torch.utils.data import DataLoader
 import flwr
 from typing import Optional
 from flwr_datasets import FederatedDataset
-from flwr_datasets.partitioner import DirichletPartitioner, IidPartitioner
+from flwr_datasets.partitioner import (
+    DirichletPartitioner,
+    IidPartitioner,
+    PathologicalPartitioner,
+)
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 # print(f"Training on {DEVICE}")
@@ -26,6 +30,7 @@ from config import (
     DIRICHLET_ALPHA,
     DATASET,
     DASHBOARD_SERVER_URL,
+    NUM_CLASSES_PER_PARTITION,
 )
 
 
@@ -42,12 +47,18 @@ def load_datasets(partition_id: Optional[int] = None):
         partitioner = IidPartitioner(
             num_partitions=num_partitions,
         )
-    else:
+    elif PARTITIONER == "dirichlet":
         partitioner = DirichletPartitioner(
             num_partitions=num_partitions,
             partition_by="label",
             alpha=DIRICHLET_ALPHA,  # 0.9
             self_balancing=True,
+        )
+    else:
+        partitioner = PathologicalPartitioner(
+            num_partitions=num_partitions,
+            partition_by="label",
+            num_classes_per_partition=NUM_CLASSES_PER_PARTITION,
         )
 
     fds = FederatedDataset(dataset=DATASET, partitioners={"train": partitioner})
