@@ -131,6 +131,61 @@ def train(net, trainloader, optimizer: torch.optim.Adam, epochs: int, verbose=Fa
 
     return losses, accuracies
 
+def train_with_zi_yi(net, trainloader, optimizer, epochs, beta, zi, yi, verbose=False):
+    net.to(DEVICE)
+    criterion = torch.nn.CrossEntropyLoss()
+    net.train()
+    losses, accuracies = [], []
+
+    # accumulator for average gradients
+    grad_accumulator = {name: torch.zeros_like(p, device=DEVICE) 
+                        for name, p in net.named_parameters() if p.requires_grad}
+    num_batches = 0
+
+    for epoch in range(epochs):
+        correct, total, epoch_loss = 0, 0, 0.0
+        for batch in trainloader:
+            images, labels = batch["img"].to(DEVICE), batch["label"].to(DEVICE)
+            optimizer.zero_grad()
+            outputs = net(images)
+            loss = criterion(outputs, labels)
+            loss.backward()
+
+            # --- apply gradient correction per-parameter ---
+            with torch.no_grad():
+                for name, p in net.named_parameters():
+                    if p.grad is not None:
+                        correction = beta * (zi.get(name, 0.0) + yi.get(name, 0.0))
+                        p.grad += correction
+
+            # --- accumulate gradients ---
+            with torch.no_grad():
+                for name, p in net.named_parameters():
+                    if p.grad is not None:
+                        grad_accumulator[name] += p.grad.clone()
+
+            optimizer.step()
+            num_batches += 1
+
+            # metrics
+            epoch_loss += loss.item()
+            total += labels.size(0)
+            correct += (torch.max(outputs.data, 1)[1] == labels).sum().item()
+
+        epoch_loss /= len(trainloader.dataset)
+        epoch_acc = correct / total
+        losses.append(epoch_loss)
+        accuracies.append(epoch_acc)
+        if verbose:
+            print(f"Epoch {epoch+1}: train loss {epoch_loss:.4f}, accuracy {epoch_acc:.4f}")
+
+    # average gradients
+    for name in grad_accumulator:
+        grad_accumulator[name] /= num_batches
+
+    return losses, accuracies, grad_accumulator
+
+
 
 def test(net, testloader):
     """Evaluate the network on the entire test set."""
