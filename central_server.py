@@ -44,6 +44,7 @@ class FedAvgWithGradientCorrection(fl.server.strategy.FedAvg):
     def aggregate_fit(self, rnd, results, failures):
         aggregated_parameters = super().aggregate_fit(rnd, results, failures)
         print(aggregated_parameters, rnd, results, failures)
+
         if aggregated_parameters is not None and results:
             # Each result.metrics["gradients"] contains group_avg_grad from edge
             group_grads = [json.loads(r.metrics["gradients"]) for _, r in results]
@@ -53,15 +54,20 @@ class FedAvgWithGradientCorrection(fl.server.strategy.FedAvg):
             for name in group_grads[0]:
                 global_avg_grad[name] = np.mean([gg[name] for gg in group_grads], axis=0)
 
+            # Convert global_avg_grad to lists (JSON-safe)
+            global_avg_grad_serializable = {name: grad.tolist() for name, grad in global_avg_grad.items()}
+
             # Compute yi for each group: yi_j = global_avg_grad - group_avg_grad_j
             yi_per_group = {}
             for (client, _), group_grad in zip(results, group_grads):
-                # Use client.cid or index as key
                 client_id = getattr(client, "cid", None)
-                yi_per_group[client_id] = {name: global_avg_grad[name] - group_grad[name] for name in group_grad}
+                yi_per_group[client_id] = {name: (global_avg_grad[name] - group_grad[name]).tolist()
+                                        for name in group_grad}
 
             # Save yi for next round
             self.yi_per_group = yi_per_group
+            self.global_avg_grad = global_avg_grad_serializable
+
             print(f"[Central Server] Computed yi for {len(yi_per_group)} groups.")
 
         return aggregated_parameters
@@ -90,7 +96,7 @@ class FedAvgWithGradientCorrection(fl.server.strategy.FedAvg):
             )
 
             # Add yi to config
-            cfg["yi"] = yi
+            cfg["yi"] = json.dumps(yi)
 
             # Re-wrap as FitIns and append with ClientProxy
             new_fit_instructions.append((client, FitIns(fit_ins.parameters, cfg)))

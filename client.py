@@ -100,8 +100,8 @@ class FlowerClient(fl.client.NumPyClient):
             print("Received initial model from server, starting training...")
 
         # --- load correction terms from config ---
-        zi = config.get("zi", {})
-        yi = config.get("yi", {})
+        zi = json.loads(config.get("zi", "{}"))
+        yi = json.loads(config.get("yi", "{}"))
         beta = config.get("beta", GRADIENT_CORRECTION_BETA)
 
         # convert numpy arrays -> torch tensors on correct device
@@ -124,7 +124,7 @@ class FlowerClient(fl.client.NumPyClient):
         })
 
         # convert gradients to numpy before sending back
-        grads_numpy = {k: v.cpu().numpy() for k, v in gradients.items()}
+        grads_numpy = {k: v.cpu().numpy().tolist() for k, v in gradients.items()}
         grads_json = json.dumps(grads_numpy)
 
         return get_parameters(self.net), len(self.trainloader.dataset), {"gradients": grads_json}

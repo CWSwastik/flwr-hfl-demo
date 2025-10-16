@@ -50,30 +50,43 @@ class EdgeStrategy(fl.server.strategy.FedAvg):
 
     def aggregate_fit(self, rnd, results, failures):
         print(f"[Edge Server {args.name}] Aggregating fit results at round {rnd}.")
+        
         aggregated_parameters = super().aggregate_fit(rnd, results, failures)
+        
         if aggregated_parameters is not None:
             self.shared_state["aggregated_model"] = aggregated_parameters
             examples = [r.num_examples for _, r in results]
             self.shared_state["num_examples"] = sum(examples)
 
-            client_ids = [cid for cid, _ in results]
+            clients = [client for client, _ in results]
+            # Already lists from client JSON
             client_grads = [json.loads(r.metrics["gradients"]) for _, r in results]
 
+            # Compute average gradient (still NumPy temporarily)
             avg_grad = {}
             for name in client_grads[0]:
                 avg_grad[name] = np.mean([cg[name] for cg in client_grads], axis=0)
 
+            # Convert avg_grad to lists for shared_state
+            avg_grad_serializable = {name: grad.tolist() for name, grad in avg_grad.items()}
+
+            # Compute zi_per_client as differences
             zi_per_client = {}
-            for cid, grads in zip(client_ids, client_grads):
-                zi_per_client[cid] = {name: avg_grad[name] - grads[name] for name in grads}
+            for client, grads in zip(clients, client_grads):
+                client_id_str = getattr(client, "cid", str(client))
+                zi_per_client[client_id_str] = {name: (avg_grad[name] - grads[name]).tolist()
+                                    for name in grads}
 
-            self.shared_state["zi_per_client"] = zi_per_client
-            self.shared_state["group_avg_grad"] = avg_grad
+            # Store safely in shared_state
+            # print(zi_per_client, avg_grad_serializable)
+            self.shared_state["zi_per_client"] = json.dumps(zi_per_client)
+            self.shared_state["group_avg_grad"] = json.dumps(avg_grad_serializable)
+
             print(f"[Edge Server] Computed zi for {len(zi_per_client)} clients.")
-
-            # print(parameters_to_ndarrays(aggregated_parameters[0])[0][0][0][0])
             print(f"[Edge Server] Aggregated model at round {rnd}.")
+
         return aggregated_parameters
+
 
     def aggregate_evaluate(self, server_round, results, failures):
         if not results:
@@ -148,21 +161,32 @@ class EdgeStrategy(fl.server.strategy.FedAvg):
         """Send per-client zi and global yi to clients."""
         print(f"[Edge Server] Configuring fit for round {server_round}...")
 
+        # Let the base FedAvg select the clients
+        fit_instructions = super().configure_fit(
+            server_round, parameters, client_manager, **kwargs
+        )
+
         # yi is received from central server, stored in shared_state
         yi = self.shared_state.get(
             "yi", {name: 0.0 for name in self.shared_state.get("group_avg_grad", {})}
         )
 
+        if isinstance(yi, str):
+            yi = json.loads(yi)
+
+
         # zi values computed in aggregate_fit
         zi_per_client = self.shared_state.get("zi_per_client", {})
+        if isinstance(zi_per_client, str):
+            zi_per_client = json.loads(zi_per_client)
 
-        # Learning rate/beta
         beta = GRADIENT_CORRECTION_BETA
 
-        # Build FitIns instructions per client
-        fit_instructions = []
+        new_fit_instructions = []
 
-        for cid, client in client_manager.all().items():
+        for client, fit_ins in fit_instructions:
+            cid = getattr(client, "cid", None)
+
             # Default zi if missing
             if zi_per_client:
                 client_zi = zi_per_client.get(
@@ -171,19 +195,19 @@ class EdgeStrategy(fl.server.strategy.FedAvg):
             else:
                 client_zi = {name: 0.0 for name in yi}
 
-            # Include client_id so central server can match
-            cfg = {
+            cfg = fit_ins.config.copy()
+            cfg.update({
                 "round": server_round,
-                "zi": client_zi,
-                "yi": yi,
+                "zi": json.dumps(client_zi),
+                "yi": json.dumps(yi),
                 "beta": beta,
                 "cid": cid,
-            }
+            })
 
-            # Wrap as FitIns and pair with ClientProxy
-            fit_instructions.append((client, FitIns(parameters, cfg)))
+            new_fit_instructions.append((client, FitIns(fit_ins.parameters, cfg)))
 
-        return fit_instructions
+        print(f"Prepared {len(new_fit_instructions)} fit instructions")
+        return new_fit_instructions
 
 def run_edge_server(shared_state, params, round):
     strategy = EdgeStrategy(
@@ -218,7 +242,8 @@ def run_edge_as_client(shared_state):
             print(f"[Edge Client {args.name}] Received model from central server.")
             print(config)
 
-            self.shared_state["yi"] = config["yi"]
+            self.shared_state["yi"] = config["yi"] # do not json.loads this right now, it will be loaded later
+
             # Start the edge server process for local aggregation
             server_process = multiprocessing.Process(
                 target=run_edge_server,
@@ -234,7 +259,7 @@ def run_edge_as_client(shared_state):
                 res = parameters_to_ndarrays(agg_model[0])
                 print(f"[Edge Client {args.name}] Sending model to central server.")
                 group_avg_grad = self.shared_state.get("group_avg_grad")
-                return res, num_examples, {"gradients": json.dumps(group_avg_grad)}
+                return res, num_examples, {"gradients": group_avg_grad}
             else:
                 # something broke
                 default = [np.array([0.0, 0.0, 0.0, 0.0])]
