@@ -240,7 +240,7 @@ def run_edge_as_client(shared_state):
 
         def fit(self, parameters, config):
             print(f"[Edge Client {args.name}] Received model from central server.")
-            print(config)
+            # print(config)
 
             self.shared_state["yi"] = config["yi"] # do not json.loads this right now, it will be loaded later
 

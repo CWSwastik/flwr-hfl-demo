@@ -43,7 +43,7 @@ class FedAvgWithGradientCorrection(fl.server.strategy.FedAvg):
 
     def aggregate_fit(self, rnd, results, failures):
         aggregated_parameters = super().aggregate_fit(rnd, results, failures)
-        print(aggregated_parameters, rnd, results, failures)
+        # print(aggregated_parameters, rnd, results, failures)
 
         if aggregated_parameters is not None and results:
             # Each result.metrics["gradients"] contains group_avg_grad from edge
