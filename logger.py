@@ -3,7 +3,7 @@ from pathlib import Path
 import datetime
 import sys
 import logging
-
+from config import EXPERIMENT_NAME
 
 class RemoveWarningsFilter(logging.Filter):
     def filter(self, record):
@@ -31,7 +31,7 @@ lib_logger.addHandler(handler)
 class Logger:
     def __init__(self, subfolder, file_path, headers, init_file=True):
         script_dir = Path(__file__).resolve().parent
-        logs_dir = script_dir / "logs" / subfolder
+        logs_dir = script_dir / "logs" / EXPERIMENT_NAME / subfolder
         logs_dir.mkdir(parents=True, exist_ok=True)
         self.file_path = logs_dir / file_path
 
