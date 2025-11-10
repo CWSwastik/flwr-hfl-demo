@@ -27,6 +27,7 @@ from config import (
     TRAINING_SCHEDULER_GAMMA,
     TRAINING_SCHEDULER_STEP_SIZE,
     DASHBOARD_SERVER_URL,
+    EXPERIMENT_NAME
 )
 
 import importlib
@@ -172,6 +173,7 @@ def create_client(partition_id, model) -> fl.client.Client:
         os.path.join(
             current_dir,
             "logs",
+            EXPERIMENT_NAME,
             "clients",
             f"{args.name}_{args.partition_id}_data_dist.json",
         ),
