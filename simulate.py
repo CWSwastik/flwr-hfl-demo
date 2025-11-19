@@ -186,6 +186,9 @@ def spawn_processes():
                 if p.poll() is not None:
                     print(f"❌ Process {name} has ended")
                     procs.remove((name, p))
+
+            if len(procs) == 0:
+                break
             time.sleep(5)
 
     else:
