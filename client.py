@@ -4,12 +4,14 @@ import numpy as np
 import time
 import argparse
 import requests
+import torch
 
 from utils import (
     load_datasets,
     get_parameters,
     set_parameters,
     train,
+    train_with_zi_yi,
     test,
     DEVICE,
     get_dataloader_summary,
@@ -19,11 +21,13 @@ from utils import (
 from config import (
     NUM_ROUNDS,
     MODEL,
+    GRADIENT_CORRECTION_BETA,
     TRAINING_LEARNING_RATE,
     TRAINING_WEIGHT_DECAY,
     TRAINING_SCHEDULER_GAMMA,
     TRAINING_SCHEDULER_STEP_SIZE,
     DASHBOARD_SERVER_URL,
+    EXPERIMENT_NAME
 )
 
 import importlib
@@ -71,7 +75,7 @@ class FlowerClient(fl.client.NumPyClient):
         self.net = net
         self.trainloader = trainloader
         self.valloader = valloader
-        self.round = 0
+        self.round = 1
 
         self.optimizer = Adam(
             self.net.parameters(),
@@ -96,19 +100,36 @@ class FlowerClient(fl.client.NumPyClient):
         else:
             print("Received initial model from server, starting training...")
 
-        losses, accuracies = train(self.net, self.trainloader, self.optimizer, epochs=1)
-        train_logger.log(
-            {
-                "round": self.round,
-                "loss": losses[0],
-                "accuracy": accuracies[0],
-                "data_samples": len(self.trainloader.dataset),
-            }
+        # --- load correction terms from config ---
+        zi = json.loads(config.get("zi", "{}"))
+        yi = json.loads(config.get("yi", "{}"))
+        beta = config.get("beta", GRADIENT_CORRECTION_BETA)
+
+        # convert numpy arrays -> torch tensors on correct device
+        device = next(self.net.parameters()).device
+        zi = {k: torch.tensor(v, dtype=torch.float32, device=device) for k, v in zi.items()}
+        yi = {k: torch.tensor(v, dtype=torch.float32, device=device) for k, v in yi.items()}
+
+        # --- train with gradient correction ---
+        losses, accuracies, gradients = train_with_zi_yi(
+            self.net, self.trainloader, self.optimizer,
+            epochs=1, beta=beta, zi=zi, yi=yi
         )
-        # print(get_parameters(self.net)[0][0][0][0])
 
-        return get_parameters(self.net), len(self.trainloader.dataset), {}
+        # --- logging ---
+        train_logger.log({
+            "round": self.round,
+            "loss": losses[0],
+            "accuracy": accuracies[0],
+            "data_samples": len(self.trainloader.dataset),
+        })
 
+        # convert gradients to numpy before sending back
+        grads_numpy = {k: v.cpu().numpy().tolist() for k, v in gradients.items()}
+        grads_json = json.dumps(grads_numpy)
+
+        return get_parameters(self.net), len(self.trainloader.dataset), {"gradients": grads_json}
+    
     def evaluate(self, parameters, config):
         set_parameters(self.net, parameters)
         loss, accuracy = test(self.net, self.valloader)
@@ -152,6 +173,7 @@ def create_client(partition_id, model) -> fl.client.Client:
         os.path.join(
             current_dir,
             "logs",
+            EXPERIMENT_NAME,
             "clients",
             f"{args.name}_{args.partition_id}_data_dist.json",
         ),

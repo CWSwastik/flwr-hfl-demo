@@ -1,0 +1,4 @@
+TOPOLOGY_FILE,NUM_CLIENTS,DATASET,MODEL
+topo.yml,4,mnist,lenet_mnist
+topo.yml,4,fashion_mnist,lenet_mnist
+topo.yml,4,cifar10,lenet_cifar10

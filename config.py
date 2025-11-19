@@ -1,16 +1,21 @@
-NUM_ROUNDS = 100
-TOPOLOGY_FILE = "topo-10c.yml"
+NUM_ROUNDS = 2
+TOPOLOGY_FILE = "topo-16clients.yml"
 
-NUM_CLIENTS = 10
-MIN_CLIENTS_PER_EDGE = 3
+NUM_CLIENTS = 16
+MIN_CLIENTS_PER_EDGE = 8
 
-MODEL = "lenet_mnist"  # vgg, lenet_mnist, lenet_cifar10
-DATASET = "fashion_mnist"  # mnist, cifar10, fashion_mnist
+MODEL = "lenet_mnist"
+DATASET = "mnist"
 
-BATCH_SIZE = 32
-PARTITIONER = "pathological"  # "iid" or "dirichlet" or "pathological"
-DIRICHLET_ALPHA = 0.5
+BATCH_SIZE = 16
+PARTITIONER = "iid"
+DIRICHLET_ALPHA = 0.1
 NUM_CLASSES_PER_PARTITION = 3  # used in pathological partitioning (limit label)
+NUM_CLASSES = 10  # total number of classes in the dataset
+
+CLUSTER_STRATEGY = "none"
+
+GRADIENT_CORRECTION_BETA = 1
 
 TRAINING_LEARNING_RATE = 5 * 1e-4
 TRAINING_WEIGHT_DECAY = 1e-4
@@ -19,3 +24,17 @@ TRAINING_SCHEDULER_STEP_SIZE = 10
 TRAINING_SCHEDULER_GAMMA = 0.1
 
 DASHBOARD_SERVER_URL = "https://f772957a48fe.ngrok-free.app"
+SPLIT=PARTITIONER
+
+if PARTITIONER == "dirichlet":
+    SPLIT=f"{SPLIT}_{DIRICHLET_ALPHA}"
+elif PARTITIONER == "pathological":
+    SPLIT=f"{SPLIT}_{NUM_CLASSES_PER_PARTITION}"
+
+if CLUSTER_STRATEGY != "none":
+    SPLIT=f"{SPLIT}-{CLUSTER_STRATEGY}"
+
+if GRADIENT_CORRECTION_BETA == 1:
+    SPLIT=f"{SPLIT}-gc"
+
+EXPERIMENT_NAME = "test-iid-none"
