@@ -75,7 +75,7 @@ class FlowerClient(fl.client.NumPyClient):
         self.net = net
         self.trainloader = trainloader
         self.valloader = valloader
-        self.round = 0
+        self.round = 1
 
         self.optimizer = Adam(
             self.net.parameters(),
