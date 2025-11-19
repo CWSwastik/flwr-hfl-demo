@@ -1,4 +1,4 @@
-NUM_ROUNDS = 10
+NUM_ROUNDS = 2
 TOPOLOGY_FILE = "topo-16clients.yml"
 
 NUM_CLIENTS = 16
