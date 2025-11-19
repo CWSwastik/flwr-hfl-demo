@@ -1,0 +1,33 @@
+[
+  {
+    "NUM_CLIENTS": 16,
+    "MIN_CLIENTS_PER_EDGE": 8,
+    "DATASET": "mnist",
+    "MODEL": "lenet_mnist",
+    "CLUSTER_STRATEGY": "none",
+    "PARTITIONER" : "iid",
+    "NUM_ROUNDS": 2,
+    "EXPERIMENT_NAME": "test-iid-none"
+  },
+  {
+    "NUM_CLIENTS": 16,
+    "MIN_CLIENTS_PER_EDGE": 8,
+    "DATASET": "mnist",
+    "MODEL": "lenet_mnist",
+    "CLUSTER_STRATEGY": "emd",
+    "PARTITIONER" : "iid",
+    "NUM_ROUNDS": 2,
+    "EXPERIMENT_NAME": "test-iid-emd"
+  },
+  {
+    "NUM_CLIENTS": 16,
+    "MIN_CLIENTS_PER_EDGE": 8,
+    "DATASET": "mnist",
+    "MODEL": "lenet_mnist",
+    "CLUSTER_STRATEGY": "none",
+    "PARTITIONER" : "dirichlet",
+    "NUM_ROUNDS": 2,
+    "EXPERIMENT_NAME": "test-dirchlet-none"
+  }
+]
+

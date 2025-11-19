@@ -5,3 +5,4 @@ torch
 torchvision 
 matplotlib
 requests
+scipy==1.16.3
