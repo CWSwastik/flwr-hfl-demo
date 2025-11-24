@@ -21,7 +21,20 @@ parser.add_argument(
     type=str,
     help="The experiment ID for the dashboard",
 )
+parser.add_argument(
+    "--min_edges",
+    type=int,
+    help="Minimum number of edge servers needed",
+    default=2,
+)
+parser.add_argument(
+    "--enable_dashboard",
+    type=bool,
+    help="Enable logging to dashboard",
+    default=False,
+)
 args = parser.parse_args()
+min_edges = args.min_edges
 
 logger = Logger(
     subfolder="central",
@@ -131,16 +144,17 @@ class FedAvgWithGradientCorrection(fl.server.strategy.FedAvg):
         )
 
         # Log to dashboard
-        log_to_dashboard(
-            args.exp_id,
-            "central",
-            {
-                "device": "central_server",
-                "round": server_round,
-                "loss": loss,
-                "accuracy": accuracy,
-            },
-        )
+        if args.enable_dashboard:
+            log_to_dashboard(
+                args.exp_id,
+                "central",
+                {
+                    "device": "central_server",
+                    "round": server_round,
+                    "loss": loss,
+                    "accuracy": accuracy,
+                },
+            )
 
         print(
             f"[Central Server] Evaluate Round {server_round}: Loss = {loss}, Accuracy = {accuracy}"
@@ -171,7 +185,7 @@ class FedAvgWithGradientCorrection(fl.server.strategy.FedAvg):
 
         return float(aggregated_loss), {"accuracy": float(aggregated_accuracy)}
     
-strategy = FedAvgWithGradientCorrection()
+strategy = FedAvgWithGradientCorrection(min_fit_clients=min_edges, min_available_clients=min_edges)
 
 if __name__ == "__main__":
     config = ServerConfig(num_rounds=NUM_ROUNDS)

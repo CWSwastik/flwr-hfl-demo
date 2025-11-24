@@ -10,7 +10,7 @@ import multiprocessing
 import argparse
 from logger import Logger
 from utils import load_datasets, set_parameters, test, log_to_dashboard
-from config import MODEL, MIN_CLIENTS_PER_EDGE, GRADIENT_CORRECTION_BETA
+from config import MODEL, MIN_CLIENTS_PER_EDGE, GRADIENT_CORRECTION_BETA, ENABLE_DASHBOARD
 
 parser = argparse.ArgumentParser(description="Start a Flower Edge Server.")
 parser.add_argument(
@@ -30,6 +30,12 @@ parser.add_argument(
     "--exp_id",
     type=str,
     help="The experiment ID for the dashboard",
+)
+parser.add_argument(
+    "--min_clients",
+    type=int,
+    help="Minimum number of clients per edge server",
+    default=MIN_CLIENTS_PER_EDGE,
 )
 
 args = parser.parse_args()
@@ -140,16 +146,17 @@ class EdgeStrategy(fl.server.strategy.FedAvg):
         )
 
         # Log to dashboard
-        log_to_dashboard(
-            args.exp_id,
-            "edge",
-            {
-                "device": args.name,
-                "round": server_round,
-                "loss": loss,
-                "accuracy": accuracy,
-            },
-        )
+        if ENABLE_DASHBOARD:
+            log_to_dashboard(
+                args.exp_id,
+                "edge",
+                {
+                    "device": args.name,
+                    "round": server_round,
+                    "loss": loss,
+                    "accuracy": accuracy,
+                },
+            )
 
         print(
             f"[Edge Server] Evaluate Round {server_round}: Loss = {loss}, Accuracy = {accuracy}"
