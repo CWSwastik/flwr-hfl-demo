@@ -45,10 +45,10 @@ logger = Logger(
 server_address = args.address
 
 class FedAvgWithGradientCorrection(fl.server.strategy.FedAvg):
-    def __init__(self):
+    def __init__(self, min_fit_clients, min_available_clients):
         super().__init__(
-            min_fit_clients=2,
-            min_available_clients=2,
+            min_fit_clients=min_fit_clients,
+            min_available_clients=min_available_clients,
             on_fit_config_fn=lambda rnd: {"round": rnd},
             on_evaluate_config_fn=lambda rnd: {"round": rnd},
         )

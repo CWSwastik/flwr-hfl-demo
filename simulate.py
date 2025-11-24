@@ -10,17 +10,19 @@ from config import (
     TOPOLOGY_FILE,
     NUM_CLIENTS, 
     CLUSTER_STRATEGY, 
-    NUM_CLASSES
+    NUM_CLASSES,
+    MIN_CLIENTS_PER_EDGE
 )
 import config
 import random
-from utils import post_to_dashboard
-from utils import load_datasets, get_dataloader_summary
-import numpy as np
-from scipy.stats import wasserstein_distance
-from scipy.spatial.distance import jensenshannon
-from scipy.cluster.hierarchy import linkage, leaves_list
+from utils import load_datasets, get_dataloader_summary, post_to_dashboard
 import json
+from clustering_utils import (
+    parse_topology_for_clustering, 
+    cluster_clients_by_distribution,
+    assign_clusters_to_edge_servers
+)
+from collections import defaultdict
 
 
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
@@ -43,6 +45,7 @@ def get_free_port():
 
 
 def create_experiment_on_dashboard(topology):
+    if not config.ENABLE_DASHBOARD: return
     url = f"{config.DASHBOARD_SERVER_URL}/experiment/{EXP_ID}/create"
     metadata = {
         "num_clients": config.NUM_CLIENTS,
@@ -59,104 +62,89 @@ def create_experiment_on_dashboard(topology):
     url = f"{config.DASHBOARD_SERVER_URL}/experiment/{EXP_ID}/topology"
     post_to_dashboard(url, topology)
 
-def get_all_distributions():
+'''
+def compute_cluster_aware_partition_map(topo_file):
     """
-    Loads all NUM_CLIENTS partitions and returns their
-    normalized label distribution vectors.
+    1. Parses topology to find Edges and Clients.
+    2. Clusters data partitions into K clusters (K = num_edges).
+    3. Maps Cluster_i partitions -> Clients of Edge_i.
     """
-    print(f"Pre-loading all {NUM_CLIENTS} partitions to calculate distributions...")
-    dist_vectors = []
-    for pid in range(NUM_CLIENTS):
-        # Load this partition's data
-        # Note: This loads the *entire* dataset logic, which is fine
-        # as we only iterate over the trainloader once.
-        trainloader, _, _ = load_datasets(partition_id=pid)
-        summary = get_dataloader_summary(trainloader)
-        
-        dist_counts = summary["label_distribution"]
-        num_items = summary["num_items"]
-        
-        # Create a fixed-length probability vector
-        vector = np.zeros(NUM_CLASSES)
-        if num_items > 0:
-            for label_str, count in dist_counts.items():
-                label_int = int(label_str)
-                if 0 <= label_int < NUM_CLASSES:
-                    # Use normalized probabilities
-                    vector[label_int] = count / num_items 
-        
-        dist_vectors.append(vector)
-        print(f"  Loaded distribution for logical partition {pid}")
+    print(f"--- Starting Cluster-Aware Partition Mapping ({CLUSTER_STRATEGY}) ---")
     
-    return np.array(dist_vectors)
+    # 1. Parse Topology
+    topo_info = parse_topology_for_clustering(topo_file)
+    num_edges = topo_info['num_edge_servers']
+    edge_server_names = sorted(topo_info['edge_servers']) # Sort for deterministic assignment
+    edge_to_clients = topo_info['edge_to_clients']
 
-def precompute_partition_mapping():
-    """
-    Generates all partitions, clusters them, and returns
-    a mapping from logical client ID (0..N-1) to the
-    physical partition ID they should use.
-    """
-    if CLUSTER_STRATEGY == "none":
-        print("No clustering strategy selected. Using default 1-to-1 partition mapping.")
-        # Default map: logical client 0 -> partition 0, etc.
+    if num_edges == 0:
+        print("No edge servers found. Returning 1-to-1 mapping.")
         return {i: i for i in range(NUM_CLIENTS)}
 
-    # 1. Get all distribution vectors
-    dist_vectors = get_all_distributions()
+    # 2. Run Clustering (uses clustering_utils)
+    # This saves the CSVs and gives us the cluster assignments for partitions
+    save_dir = os.path.join(BASE_DIR, "logs", config.EXPERIMENT_NAME)
     
-    # 2. Calculate pairwise distance matrix
-    n = NUM_CLIENTS
-    dist_matrix = np.zeros((n, n))
+    cluster_results = cluster_clients_by_distribution(
+        num_clusters=num_edges,
+        distance_metric=CLUSTER_STRATEGY, # 'emd', 'jsd', or 'none'
+        save_dir=save_dir,
+        topology_info=topo_info
+    )
     
-    print(f"Calculating {n*n} pairwise distances using '{CLUSTER_STRATEGY}'...")
+    # partition_cluster_map: {PartitionID: ClusterID}
+    partition_cluster_map = cluster_results['cluster_assignments'] 
     
-    # Define class indices (0, 1, ..., 9) for EMD
-    class_indices = np.arange(NUM_CLASSES) 
+    # 3. Group Partitions by ClusterID
+    # cluster_partitions[1] = [pid1, pid5, ...]
+    cluster_partitions = defaultdict(list)
+    for pid, cid in partition_cluster_map.items():
+        cluster_partitions[cid].append(pid)
 
-    for i in range(n):
-        for j in range(i + 1, n):
-            dist = 0.0
-            if CLUSTER_STRATEGY == "emd":
-                # 1D Wasserstein distance (Earth Mover's Distance)
-                # We use the probability vectors as weights for the class indices
-                dist = wasserstein_distance(class_indices, class_indices, 
-                                            dist_vectors[i], dist_vectors[j])
-            elif CLUSTER_STRATEGY == "jsd":
-                # Jensen-Shannon Divergence
-                dist = jensenshannon(dist_vectors[i], dist_vectors[j])
+    # 4. Map Clusters to Edges
+    # We have clusters 1..K and Edges E1..EK
+    # We map Cluster 1 -> Edge 1, Cluster 2 -> Edge 2, etc.
+    cluster_ids = sorted(cluster_partitions.keys()) 
+    
+    final_client_partition_map = {}
+
+    print("\n🔗 Mapping Data Clusters to Edge Servers:")
+    
+    for i, edge_name in enumerate(edge_server_names):
+        if i >= len(cluster_ids): 
+            print(f"⚠️ Warning: More edges than clusters. Edge {edge_name} gets no special mapping.")
+            break
+        
+        cluster_id = cluster_ids[i]
+        partitions_in_cluster = cluster_partitions[cluster_id]
+        clients_on_edge = edge_to_clients[edge_name] # List of client names
+        
+        print(f"  Edge '{edge_name}' <==> Cluster {cluster_id} (Partitions: {partitions_in_cluster})")
+        
+        # Assign partitions to clients
+        # We iterate through the clients attached to this edge and give them 
+        # the partitions that belong to this cluster.
+        for j, client_name in enumerate(clients_on_edge):
+            if j < len(partitions_in_cluster):
+                # Get the logical ID defined in topology for this client name
+                client_info = topo_info['client_info'].get(client_name)
+                if client_info:
+                    logical_pid = client_info['partition_id']
+                    if logical_pid is not None:
+                        physical_pid = partitions_in_cluster[j]
+                        final_client_partition_map[int(logical_pid)] = int(physical_pid)
             else:
-                raise ValueError(f"Unknown CLUSTER_STRATEGY: {CLUSTER_STRATEGY}")
-            
-            dist_matrix[i, j] = dist
-            dist_matrix[j, i] = dist
+                 print(f"    ⚠️ Not enough partitions in Cluster {cluster_id} for all clients on {edge_name}")
 
-    # 3. Perform hierarchical clustering
-    # We need a condensed distance matrix (upper triangle) for linkage
-    condensed_dist_matrix = dist_matrix[np.triu_indices(n, k=1)]
-    
-    print("Performing hierarchical clustering...")
-    linked = linkage(condensed_dist_matrix, 'average')
+    # Fill in any missing clients with 1-to-1 to avoid crash
+    for i in range(NUM_CLIENTS):
+        if i not in final_client_partition_map:
+            final_client_partition_map[i] = i
 
-    # 4. Get optimal leaf ordering
-    # This re-orders the *original indices* (0..N-1) so
-    # that similar partitions are adjacent in the list.
-    optimal_order = leaves_list(linked)
-    
-    print(f"Optimal partition order (physical partition IDs): {optimal_order}")
-
-    # 5. Create the final map
-    # logical_client_id 0 -> physical_partition_id optimal_order[0]
-    # logical_client_id 1 -> physical_partition_id optimal_order[1]
-    # ...
-    client_to_partition_map = {
-        logical_id: physical_partition_id 
-        for logical_id, physical_partition_id in enumerate(optimal_order)
-    }
-    
-    print("Partition mapping created:")
-    print(json.dumps(client_to_partition_map, indent=2))
-    return client_to_partition_map
-
+    print(f"Final Mapping: {json.dumps(final_client_partition_map, indent=2)}")
+    return final_client_partition_map
+'''
+'''
 def spawn_processes():
     topo_file = get_abs_path(f"topologies/{TOPOLOGY_FILE}")
 
@@ -168,11 +156,21 @@ def spawn_processes():
         topology = yaml.safe_load(file)
 
     try:
-        # This map dictates which physical partition each logical client gets
-        partition_map = precompute_partition_mapping()
+        if CLUSTER_STRATEGY != "none":
+            partition_map = compute_cluster_aware_partition_map(topo_file)
+        else:
+            print("Cluster strategy is 'none'. Using 1-to-1 mapping.")
+            partition_map = {i: i for i in range(NUM_CLIENTS)}
+            # Still save distributions for reference
+            save_dir = os.path.join(BASE_DIR, "logs", config.EXPERIMENT_NAME)
+            topo_info = parse_topology_for_clustering(topo_file)
+            # Dummy clustering call just to generate CSVs with k=1
+            cluster_clients_by_distribution(NUM_CLIENTS, 'none', save_dir, topo_info)
+
     except Exception as e:
-        print(f"❌ Error during partition pre-clustering: {e}")
-        print("Falling back to default 1-to-1 mapping.")
+        print(f"❌ Error during clustering: {e}")
+        import traceback
+        traceback.print_exc()
         partition_map = {i: i for i in range(NUM_CLIENTS)}
     
     current_os = platform.system()
@@ -338,7 +336,288 @@ def spawn_processes():
 
     else:
         print(f"❌ Unsupported OS: {current_os}")
+'''
 
+def compute_client_to_edge_mapping(topo_file):
+    print(f"--- Starting Topology Analysis ({CLUSTER_STRATEGY}) ---")
+    topo_info = parse_topology_for_clustering(topo_file)
+    num_edges = topo_info['num_edge_servers']
+    if num_edges == 0: return {}
+
+    save_dir = os.path.join(BASE_DIR, "logs", config.EXPERIMENT_NAME)
+    
+    cluster_results = cluster_clients_by_distribution(
+        num_clusters=num_edges,
+        distance_metric=CLUSTER_STRATEGY,
+        save_dir=save_dir,
+        topology_info=topo_info
+    )
+    
+    cluster_assignments = cluster_results['cluster_assignments'] 
+    cluster_to_edge = assign_clusters_to_edge_servers(topo_info, cluster_results)
+    partition_to_edge_target = {}
+    
+    print("\n🔗 Re-routing Clients based on Data:")
+    for pid, cid in cluster_assignments.items():
+        target_edge = cluster_to_edge.get(cid)
+        if target_edge:
+            partition_to_edge_target[pid] = target_edge
+
+    print(f"partition_to_edge_target: {json.dumps(partition_to_edge_target, indent=2)}")
+    return partition_to_edge_target
+
+def print_topology_summary(edge_client_counts, client_assignments, edge_configs, msg="After Clustering"):
+    """
+    Displays a formatted summary of the new topology in the terminal.
+    """
+    print("\n" + "="*80)
+    print(f"🚀 TOPOLOGY SUMMARY {msg} | Strategy: {CLUSTER_STRATEGY}")
+    print("="*80)
+    
+    # 1. Edge Server Summary
+    print(f"\n{ 'Edge Server Name':<20} | { 'Host:Port':<20} | { 'Min Clients':<12} | { 'Status':<10}")
+    print("-" * 75)
+    
+    for edge_name, count in edge_client_counts.items():
+        config = edge_configs.get(edge_name, {"host": "???", "port": "???"})
+        address = f"{config['host']}:{config['port']}"
+        status = "ACTIVE" if count > 0 else "IDLE"
+        print(f"{edge_name:<20} | {address:<20} | {count:<12} | {status:<10}")
+
+    # 2. Client Distribution Summary (Brief)
+    print("\n📊 Client Assignments:")
+    # Group clients by edge for display
+    edge_groups = defaultdict(list)
+    for client, details in client_assignments.items():
+        edge_groups[details['target_edge']].append(f"{client}(P{details['pid']})")
+    
+    for edge, clients in edge_groups.items():
+        # chunk clients for display
+        client_str = ", ".join(clients)
+        if len(client_str) > 80: client_str = client_str[:77] + "..."
+        print(f"  📌 {edge}: {client_str}")
+        
+    print("="*80 + "\n")
+
+def spawn_processes():
+    topo_file = get_abs_path(f"topologies/{TOPOLOGY_FILE}")
+    if not os.path.exists(topo_file):
+        print(f"❌ Error: topo.yml not found at {topo_file}")
+        return
+
+    with open(topo_file, "r") as file:
+        topology = yaml.safe_load(file)
+
+    # --- STEP 1: RESOLVE PORTS ---
+    edge_configs = {} 
+    
+    # Resolve Central Server
+    for name, cfg in topology.items():
+        if cfg.get("kind") == "server":
+            if not cfg.get("port"):
+                auto_port = get_free_port()
+                print(f"Assigning free port {auto_port} to server {name}")
+                cfg["port"] = auto_port
+
+    # Resolve Edges
+    for name, cfg in topology.items():
+        if cfg.get("kind") == "edge":
+            # Upstream
+            svr = cfg.get("server", {})
+            ref = svr.get("host")
+            if ref in topology:
+                target = topology[ref]
+                svr_host = target.get("host")
+                svr_port = target.get("port")
+            else:
+                svr_host = ref
+                svr_port = svr.get("port") or get_free_port()
+            cfg["server"]["host"] = svr_host
+            cfg["server"]["port"] = svr_port
+            print(f"Edge {name} server -> {svr_host}:{svr_port}")
+
+            # Client side
+            cli = cfg.get("client", {})
+            cli_host = cli.get("host")
+            cli_port = cli.get("port") or get_free_port()
+            cfg["client"]["host"] = cli_host
+            cfg["client"]["port"] = cli_port
+            print(f"Edge {name} client -> {cli_host}:{cli_port}")
+            
+            edge_configs[name] = {"host": cfg["client"]["host"], "port": cfg["client"]["port"]}
+            print(f"Recorded Edge Config: {name} -> {edge_configs[name]}")
+
+    # --- STEP 1.5: PRINT INITIAL TOPOLOGY ---
+    initial_edge_counts = {edge: 0 for edge in edge_configs}
+    initial_assignments = {}
+
+    for name, cfg in topology.items():
+        if cfg.get("kind") == "client":
+            logical_pid = cfg.get("partition_id")
+            final_edge = "Unknown"
+            
+            # Static Lookup by Host:Port or Name Ref
+            ref = cfg.get("host")
+            
+            # Direct Name Ref
+            if ref in topology and topology[ref].get("kind") == "edge":
+                final_edge = ref
+                # Sync port if it was a reference
+                edge_cli = topology[ref]["client"]
+                cfg["host"] = edge_cli.get("host")
+                cfg["port"] = edge_cli.get("port")
+            
+            # Host:Port match
+            if final_edge == "Unknown":
+                c_host = cfg.get("host")
+                c_port = cfg.get("port")
+                for edge_name, edge_cfg in edge_configs.items():
+                     if str(edge_cfg["host"]) == str(c_host) and int(edge_cfg["port"]) == int(c_port):
+                        final_edge = edge_name
+                        break
+            
+            if final_edge in initial_edge_counts:
+                initial_edge_counts[final_edge] += 1
+            
+            initial_assignments[name] = {"pid": logical_pid, "target_edge": final_edge}
+
+    print_topology_summary(initial_edge_counts, initial_assignments, edge_configs, msg="Before Clustering")
+    
+    # --- STEP 2: CLUSTERING & MAPPING ---
+    try:
+        partition_to_edge_target = compute_client_to_edge_mapping(topo_file)
+    except Exception as e:
+        print(f"❌ Error during clustering: {e}")
+        import traceback
+        traceback.print_exc()
+        partition_to_edge_target = {}
+
+    # --- STEP 3: UPDATE TOPOLOGY & COUNT ---
+    edge_client_counts = {edge: 0 for edge in edge_configs} # Initialize all edges to 0
+    client_assignments = {} # For display purposes
+
+    for name, cfg in topology.items():
+        if cfg.get("kind") == "client":
+            logical_pid = cfg.get("partition_id")
+            final_edge = "Unknown"
+            
+            # A. Dynamic Re-routing
+            if logical_pid in partition_to_edge_target:
+                target_edge_name = partition_to_edge_target[logical_pid]
+                if target_edge_name in edge_configs:
+                    cfg["host"] = edge_configs[target_edge_name]["host"]
+                    cfg["port"] = edge_configs[target_edge_name]["port"]
+                    final_edge = target_edge_name
+            
+            # B. Static Fallback
+            if final_edge == "Unknown":
+                ref = cfg.get("host")
+                if ref in topology and topology[ref].get("kind") == "edge":
+                    final_edge = ref
+                    # Sync port if it was a reference
+                    edge_cli = topology[ref]["client"]
+                    cfg["host"] = edge_cli.get("host")
+                    cfg["port"] = edge_cli.get("port")
+
+            # Update Counts
+            if final_edge in edge_client_counts:
+                edge_client_counts[final_edge] += 1
+            
+            client_assignments[name] = {"pid": logical_pid, "target_edge": final_edge}
+            print(f"Client {name} (Logical ID {logical_pid}) assigned to Edge {final_edge}")
+
+    # --- STEP 4: PRINT SUMMARY ---
+    print_topology_summary(edge_client_counts, client_assignments, edge_configs)
+
+    min_edges = sum(1 for count in edge_client_counts.values() if count > 0)
+    
+    # Wait for user validation (optional)
+    print("🚀 Spawning processes in 3 seconds...")
+    time.sleep(3)
+
+    # --- STEP 5: SPAWN ---
+    current_os = platform.system()
+    if config.ENABLE_DASHBOARD:
+        create_experiment_on_dashboard(topology)
+    
+    order = {"server": 0, "edge": 1, "client": 2}
+    sorted_topo = dict(sorted(topology.items(), key=lambda item: order.get(item[1].get("kind"), 99)))
+
+    if current_os == "Windows":
+        commands = []
+        for name, cfg in sorted_topo.items():
+            kind = cfg.get("kind")
+            if kind == "server":
+                cmd = f'py "{get_abs_path("central_server.py")}" {cfg["host"]}:{cfg["port"]} --exp_id {EXP_ID} --min_edges {min_edges} --enable_dashboard {str(config.ENABLE_DASHBOARD)}'
+            elif kind == "edge":
+                # STRICT COUNT: defaults to 0 if not in list, preventing hangs on unused edges
+                required_clients = edge_client_counts.get(name, 0)
+                cmd = (
+                    f'py "{get_abs_path("edge_server.py")}" --server '
+                    f'{cfg["server"]["host"]}:{cfg["server"]["port"]} --client '
+                    f'{cfg["client"]["host"]}:{cfg["client"]["port"]} --name {name} --exp_id {EXP_ID} '
+                    f'--min_clients {required_clients}' # Pass EXACT calculated count
+                )
+            elif kind == "client":
+                cmd = (
+                    f'py "{get_abs_path("client.py")}" '
+                    f'{cfg["host"]}:{cfg["port"]} --partition_id {cfg["partition_id"]} '
+                    f"--name {name} --exp_id {EXP_ID}"
+                )
+            else:
+                continue
+            commands.append(f'new-tab --title "{name}" -p "Command Prompt" cmd /k {cmd}')
+        
+        if shutil.which("wt"):
+            subprocess.run(f'wt {" ; ".join(commands)}', shell=True)
+        else:
+            print("Windows Terminal (wt) not found. Processes not started.")
+
+    elif current_os == "Linux":
+        procs = []
+        for name, cfg in sorted_topo.items():
+            kind = cfg.get("kind")
+            if kind == "server":
+                cmd = f'python "{get_abs_path("central_server.py")}" {cfg["host"]}:{cfg["port"]} --exp_id {EXP_ID} --min_edges {min_edges} --enable_dashboard {str(config.ENABLE_DASHBOARD)}'
+            elif kind == "edge":
+                required_clients = edge_client_counts.get(name, 0)
+                if required_clients == 0:
+                    print(f"⚠️ Edge server {name} has 0 assigned clients. It is not invoked to prevent hangs.")
+                else:
+                    cmd = (
+                        f'python "{get_abs_path("edge_server.py")}" --server '
+                        f'{cfg["server"]["host"]}:{cfg["server"]["port"]} '
+                        f'--client {cfg["client"]["host"]}:{cfg["client"]["port"]} --name {name} --exp_id {EXP_ID} '
+                        f'--min_clients {required_clients}'
+                    )
+            elif kind == "client":
+                cmd = (
+                    f'python "{get_abs_path("client.py")}" '
+                    f'{cfg["host"]}:{cfg["port"]} --partition_id {cfg["partition_id"]} '
+                    f" --name {name} --exp_id {EXP_ID}"
+                )
+            else:
+                continue
+
+            proc = subprocess.Popen(cmd, shell=True)
+            procs.append((name, proc))
+            print(f"Starting process {name} with command: {cmd}")
+            if kind == "server":
+                # give server time to initialize
+                time.sleep(30)
+
+        while procs:
+            for name, p in procs[:]:
+                if p.poll() is not None:
+                    print(f"❌ Process {name} has ended")
+                    procs.remove((name, p))
+
+            if len(procs) == 0:
+                break
+            time.sleep(5)
+
+    else:
+        print(f"❌ Unsupported OS: {current_os}")
 
 if __name__ == "__main__":
     spawn_processes()

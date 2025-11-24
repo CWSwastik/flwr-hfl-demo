@@ -39,6 +39,7 @@ parser.add_argument(
 )
 
 args = parser.parse_args()
+min_clients = args.min_clients
 
 logger = Logger(
     subfolder="edge",
@@ -220,8 +221,8 @@ def run_edge_server(shared_state, params, round):
     strategy = EdgeStrategy(
         shared_state,
         round,
-        min_fit_clients=MIN_CLIENTS_PER_EDGE,
-        min_available_clients=MIN_CLIENTS_PER_EDGE,
+        min_fit_clients=min_clients,
+        min_available_clients=min_clients,
         initial_parameters=ndarrays_to_parameters(params),
         # on_evaluate_config_fn=lambda rnd: {"round": rnd},
     )
