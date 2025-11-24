@@ -3,6 +3,8 @@ import pandas as pd
 import glob
 import os
 import altair as alt
+import graphviz
+
 
 st.set_page_config(page_title="HFL Dashboard", layout="wide")
 
@@ -58,11 +60,66 @@ def make_line_chart(df, x, y, color=None, title=""):
             color=alt.Color(f"{color}:N") if color else alt.value("#66c2a5"),
             tooltip=[x, y] + ([color] if color else []),
         )
-        .properties(height=350, width={"step": 80})
+        .properties(height=350, width=600)
         .interactive()
     )
     return chart
 
+def make_dist_chart(df, x_col, title, color_scheme="tableau10", sort_col=None, x_axis_label=None):
+    """Creates a normalized stacked bar chart with a custom X-axis label."""
+    # Melt Class columns
+    class_cols = [c for c in df.columns if c.startswith("Class_")]
+    
+    # Determine id_vars: must include x_col, and sort_col if it exists
+    id_vars = [x_col]
+    if sort_col and sort_col in df.columns and sort_col != x_col:
+        id_vars.append(sort_col)
+    
+    # Melt
+    df_melt = df.melt(id_vars=id_vars, value_vars=class_cols, var_name="Class", value_name="Count")
+    df_melt["ClassLabel"] = df_melt["Class"].apply(lambda x: x.replace("Class_", ""))
+
+    # Define Sorting
+    x_sort = None
+    if sort_col and sort_col in df.columns:
+        x_sort = alt.EncodingSortField(field=sort_col, order="ascending")
+
+    # Use custom label if provided, else default to column name
+    x_title = x_axis_label if x_axis_label else x_col
+
+    chart = alt.Chart(df_melt).mark_bar().encode(
+        x=alt.X(f"{x_col}:N", title=x_title, sort=x_sort),
+        y=alt.Y("Count:Q", stack="normalize", axis=alt.Axis(format="%"), title="Label Distribution"),
+        color=alt.Color("ClassLabel:N", title="Class", scale=alt.Scale(scheme=color_scheme)),
+        tooltip=[x_col, "ClassLabel", "Count"]
+    ).properties(title=title, height=400, width=400)
+    return chart
+
+def create_tree_graph(df, parent_col, child_col, title):
+    """Generates a Graphviz Dot string for a parent-child tree."""
+    dot = graphviz.Digraph()
+    dot.attr(rankdir='LR', size='8,5')
+    dot.attr('node', shape='box', style='filled', fillcolor='lightblue')
+    
+    # Title node (invisible or just a label)
+    # dot.attr(label=title, labelloc='t', fontsize='20')
+
+    # Get unique parents
+    parents = sorted(df[parent_col].unique())
+    
+    for p in parents:
+        p_str = str(p)
+        # Parent Node
+        dot.node(f"P_{p_str}", label=f"{title} {p_str}", fillcolor='orange', shape='folder')
+        
+        # Children
+        children = df[df[parent_col] == p][child_col].unique()
+        for c in children:
+            c_str = str(c)
+            dot.node(f"C_{c_str}", label=c_str, fillcolor='lightgrey', shape='note')
+            dot.edge(f"P_{p_str}", f"C_{c_str}")
+            
+    return dot
 
 # Logs selector
 st.header("🌲 Logs Directory")
@@ -95,97 +152,175 @@ selected_name = st.selectbox("Choose logs folder", names, index=names.index(st.s
 selected_logs = name_to_path.get(selected_name, "./logs")
 
 
-# Central
-st.header("🌐 Central Server")
-central_log = os.path.join(selected_logs, "central", "central_server.log")
-if os.path.exists(central_log):
-    df_c = pd.read_csv(central_log)
-    col1, col2 = st.columns(2)
-    with col1:
-        st.altair_chart(
-            make_line_chart(df_c, "round", "loss", title="Loss"),
-            use_container_width=True,
-        )
-    with col2:
-        st.altair_chart(
-            make_line_chart(df_c, "round", "accuracy", title="Accuracy"),
-            use_container_width=True,
-        )
-else:
-    st.warning("Central server log not found.")
+# --- TABS ---
+tab_training, tab_clustering = st.tabs(["Training Metrics", "Clustering Analysis"])
 
-# Edges
-st.header("🏗️ Edge Servers")
-edge_logs = glob.glob(os.path.join(selected_logs, "edge", "*.log"))
-# sort by base filename without extension
-edge_logs = sorted(edge_logs, key=lambda p: os.path.splitext(os.path.basename(p))[0])
-if edge_logs:
-    for path in edge_logs:
-        name = os.path.splitext(os.path.basename(path))[0]
-        try:
-            df_e = pd.read_csv(path)
-        except Exception as e:
-            st.warning(f"Failed to read edge log {path}: {e}")
-            continue
-        st.subheader(f"Edge: {name}")
-        c1, c2 = st.columns(2)
-        with c1:
+# --- TAB 1: TRAINING METRICS ---
+with tab_training:
+    # Central
+    st.header("Central Server")
+    central_log = os.path.join(selected_logs, "central", "central_server.log")
+    if os.path.exists(central_log):
+        df_c = pd.read_csv(central_log)
+								 
+        col1, col2 = st.columns(2)
+        with col1:
             st.altair_chart(
-                make_line_chart(df_e, "round", "loss", title="Loss"),
+                make_line_chart(df_c, "round", "loss", title="Loss"),
                 use_container_width=True,
             )
-        with c2:
+        with col2:
             st.altair_chart(
-                make_line_chart(df_e, "round", "accuracy", title="Accuracy"),
+                make_line_chart(df_c, "round", "accuracy", title="Accuracy"),
                 use_container_width=True,
             )
-else:
-    st.warning("No edge server logs found.")
+    else:
+        st.warning("Central server log not found.")
 
-# Clients
-st.header("👥 Clients")
-client_logs = glob.glob(os.path.join(selected_logs, "clients", "*.log"))
-clients = {}
-for path in client_logs:
-    fname = os.path.basename(path)
-    cid = fname.split("_")[0]
-    # classify as train/test based on filename
-    split = "train" if "train" in fname else "test"
-    clients.setdefault(cid, {})[split] = path
-
-if clients:
-    for cid in sorted(clients.keys()):
-        paths = clients[cid]
-        st.subheader(f"Client: {cid}")
-        parts = []
-        # prefer train then test for consistent order
-        for split in ("train", "test"):
-            p = paths.get(split)
-            if not p:
-                continue
+    # Edges
+    st.header("Edge Servers")
+    edge_logs = glob.glob(os.path.join(selected_logs, "edge", "*.log"))
+    edge_logs = sorted(edge_logs, key=lambda p: os.path.splitext(os.path.basename(p))[0])
+    if edge_logs:
+        for path in edge_logs:
+            name = os.path.splitext(os.path.basename(path))[0]
+	
             try:
-                df = pd.read_csv(p)
+                df_e = pd.read_csv(path)
             except Exception as e:
-                st.warning(f"Failed to read client log {p}: {e}")
+                st.warning(f"Failed to read edge log {path}: {e}")
                 continue
-            df["split"] = split.capitalize()
-            parts.append(df)
-        if not parts:
-            st.warning(f"No readable logs for client {cid}")
-            continue
-        df_all = pd.concat(parts, ignore_index=True)
+            st.subheader(f"Edge: {name}")
+            c1, c2 = st.columns(2)
+            with c1:
+                st.altair_chart(
+                    make_line_chart(df_e, "round", "loss", title="Loss"),
+                    use_container_width=True,
+                )
+            with c2:
+                st.altair_chart(
+                    make_line_chart(df_e, "round", "accuracy", title="Accuracy"),
+                    use_container_width=True,
+                )
+    else:
+        st.warning("No edge server logs found.")
+
+    # Clients
+    st.header("Clients")
+    client_logs = glob.glob(os.path.join(selected_logs, "clients", "*.log"))
+    clients = {}
+    for path in client_logs:
+        fname = os.path.basename(path)
+        cid = fname.split("_")[0]
+        split = "train" if "train" in fname else "test"
+        clients.setdefault(cid, {})[split] = path
+
+    if clients:
+        for cid in sorted(clients.keys(), key=lambda x: int(x.split("-")[-1]) if x.split("-")[-1].isdigit() else x):
+            paths = clients[cid]
+            st.subheader(f"Client: {cid}")
+            parts = []
+            for split in ("train", "test"):
+                p = paths.get(split)
+                if not p:
+                    continue
+                try:
+                    df = pd.read_csv(p)
+                except Exception as e:
+                    st.warning(f"Failed to read client log {p}: {e}")
+                    continue
+                df["split"] = split.capitalize()
+                parts.append(df)
+            if not parts:
+                st.warning(f"No readable logs for client {cid}")
+                continue
+            df_all = pd.concat(parts, ignore_index=True)
+            c1, c2 = st.columns(2)
+            with c1:
+                st.altair_chart(
+                    make_line_chart(df_all, "round", "loss", color="split", title="Loss"),
+                    use_container_width=True,
+                )
+            with c2:
+                st.altair_chart(
+                    make_line_chart(
+                        df_all, "round", "accuracy", color="split", title="Accuracy"
+                    ),
+                    use_container_width=True,
+                )
+    else:
+        st.warning("No client logs found.")
+
+
+# --- TAB 2: CLUSTERING ANALYSIS ---
+with tab_clustering:
+    cluster_strategy = selected_name.split("-cluster_")[-1].split("-")[0].upper()
+    st.header(f"Clustering Analysis (None vs {cluster_strategy})")
+    st.write(f"Analyzing clustering results for: **{selected_name}**")
+    
+    pre_csv = os.path.join(selected_logs, "distribution_pre_clustering.csv")
+    post_csv = os.path.join(selected_logs, "distribution_post_clustering.csv")
+    
+    # Check if files exist
+    files_exist = True
+    if not os.path.exists(pre_csv):
+        st.warning(f"Pre-clustering data not found: {pre_csv}")
+        files_exist = False
+    if not os.path.exists(post_csv):
+        st.warning(f"Post-clustering data not found: {post_csv}")
+        files_exist = False
+        
+    if files_exist:
+        df_pre = pd.read_csv(pre_csv)
+        df_post = pd.read_csv(post_csv)
+        
+        # --- Visualization ---
+        st.subheader("1. Edge/Cluster Label Distribution (Pre vs Post)")
+        
         c1, c2 = st.columns(2)
+        
         with c1:
+            st.markdown("### Pre-Clustering (Original distribution at Edges)")
+            # Sort by DefaultClusterID (original topology) if available, else ClientName
+            sort_key_pre = "DefaultClusterID" if "DefaultClusterID" in df_pre.columns else "ClientName"
             st.altair_chart(
-                make_line_chart(df_all, "round", "loss", color="split", title="Loss"),
-                use_container_width=True,
+                make_dist_chart(df_pre, sort_key_pre, "Distribution Sorted by Initial Topology", x_axis_label="Edge Server ID"),
+                use_container_width=True
             )
+            
         with c2:
+            st.markdown("### Post-Clustering")
+            # Sort by new ClusterID
+            sort_key_post = "ClusterID" if "ClusterID" in df_post.columns else "ClientName"
             st.altair_chart(
-                make_line_chart(
-                    df_all, "round", "accuracy", color="split", title="Accuracy"
-                ),
-                use_container_width=True,
+                make_dist_chart(df_post, sort_key_post, "Distribution Sorted by Assigned Cluster", x_axis_label="Edge Server ID"),
+				use_container_width=True
             )
-else:
-    st.warning("No client logs found.")
+            
+        
+        # --- SECTION 2: TOPOLOGY TREE VIEW ---
+        st.markdown("---")
+        st.subheader("2. Topology Tree View")
+        
+        t1, t2 = st.columns(2)
+        
+        with t1:
+            st.markdown("### Before Clustering (Static)")
+            if "DefaultClusterID" in df_pre.columns:
+                # Parent: DefaultClusterID, Child: ClientName
+                graph_pre = create_tree_graph(df_pre, "DefaultClusterID", "ClientName", "Edge")
+                st.graphviz_chart(graph_pre)
+            else:
+                st.info("Insufficient data for Pre-clustering tree.")
+
+        with t2:
+            st.markdown("### After Clustering (Dynamic)")
+            if "ClusterID" in df_post.columns:
+                # Parent: ClusterID, Child: ClientName
+                graph_post = create_tree_graph(df_post, "ClusterID", "ClientName", "Edge")
+                st.graphviz_chart(graph_post)
+            else:
+                st.info("Insufficient data for Post-clustering tree.")
+
+    else:
+        st.error("Required distribution CSV files not found in the selected logs folder. Run `simulate.py` first.")
