@@ -27,6 +27,7 @@ from config import (
     TRAINING_SCHEDULER_GAMMA,
     TRAINING_SCHEDULER_STEP_SIZE,
     DASHBOARD_SERVER_URL,
+    ENABLE_DASHBOARD,
     EXPERIMENT_NAME
 )
 
@@ -141,17 +142,18 @@ class FlowerClient(fl.client.NumPyClient):
                 "data_samples": len(self.valloader.dataset),
             }
         )
-        log_to_dashboard(
-            args.exp_id,
-            "client",
-            {
-                "device": args.name,
-                "round": self.round,
-                "loss": loss,
-                "accuracy": accuracy,
-                "data_samples": len(self.valloader.dataset),
-            },
-        )
+        if ENABLE_DASHBOARD:
+            log_to_dashboard(
+                args.exp_id,
+                "client",
+                {
+                    "device": args.name,
+                    "round": self.round,
+                    "loss": loss,
+                    "accuracy": accuracy,
+                    "data_samples": len(self.valloader.dataset),
+                },
+            )
         return float(loss), len(self.valloader.dataset), {"accuracy": float(accuracy)}
 
 
@@ -195,7 +197,8 @@ def create_client(partition_id, model) -> fl.client.Client:
         "testloader": get_dataloader_summary(testloader),
     }
     payload = {"device": args.name, "distribution": dist}
-    post_to_dashboard(url, payload)
+    if ENABLE_DASHBOARD:
+        post_to_dashboard(url, payload)
 
     return FlowerClient(net, trainloader, valloader)
 
