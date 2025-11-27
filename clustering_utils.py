@@ -17,7 +17,7 @@ from sklearn.mixture import GaussianMixture
 from sklearn.cluster import KMeans
 
 rand_seed = 42
-np.random.seed(seed=42)
+np.random.seed(seed=rand_seed)
 
 def parse_topology_for_clustering(topology_file_path):
     """
@@ -207,6 +207,7 @@ def cluster_clients_by_distribution(num_clusters, distance_metric='emd', save_di
         # Dummy matrices for return values
         dist_matrix = np.zeros((n_clients, n_clients))
         linkage_matrix = np.zeros((n_clients, 4))
+        cluster_labels = list(cluster_assignments.values())
         if (pid + 1) % 10 == 0 or pid == n_clients - 1:
             print(f"  Loaded {pid + 1}/{n_clients} partitions...")
     
@@ -268,12 +269,12 @@ def cluster_clients_by_distribution(num_clusters, distance_metric='emd', save_di
                     dist_matrix[j, i] = dist
         
         elif distance_metric == 'gmm':
-            gmm = GaussianMixture(n_components=num_clusters, random_state=42, n_init=10)
+            gmm = GaussianMixture(n_components=num_clusters, random_state=rand_seed, n_init=10)
             cluster_labels = gmm.fit_predict(X)
             print(f" GMM log-likelihood: {gmm.score(X):.4f}")
         
         elif distance_metric == 'kmeans':
-            kmeans = KMeans(n_clusters=num_clusters, random_state=42, n_init=10)
+            kmeans = KMeans(n_clusters=num_clusters, random_state=rand_seed, n_init=10)
             cluster_labels = kmeans.fit_predict(X)
             print(f" K-means inertia: {kmeans.inertia_:.4f}")
         
@@ -281,7 +282,8 @@ def cluster_clients_by_distribution(num_clusters, distance_metric='emd', save_di
             raise ValueError(f"Unknown distance metric: {distance_metric}")
         
         print(f"  Distance matrix shape: {dist_matrix.shape}")
-        print(f"  Distance range: [{dist_matrix[dist_matrix > 0].min():.4f}, {dist_matrix.max():.4f}]")
+        if distance_metric not in ['gmm', 'kmeans']:
+            print(f" Distance range: [{dist_matrix[dist_matrix > 0].min():.4f}, {dist_matrix.max():.4f}]")
     
     # Step 3: Perform clustering
     print(f"\n🌳 Performing clustering...")
