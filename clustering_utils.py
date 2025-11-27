@@ -12,8 +12,12 @@ import os
 from config import NUM_CLIENTS, NUM_CLASSES, EXPERIMENT_NAME, TOPOLOGY_FILE
 from utils import load_datasets, get_dataloader_summary
 import pprint
+from scipy.spatial.distance import cosine, euclidean, cityblock
+from sklearn.mixture import GaussianMixture
+from sklearn.cluster import KMeans
 
-np.random.seed(seed=42)
+rand_seed = 42
+np.random.seed(rand_seed=42)
 
 def parse_topology_for_clustering(topology_file_path):
     """
@@ -125,31 +129,32 @@ def cluster_clients_by_distribution(num_clusters, distance_metric='emd', save_di
     """
     print(f"\n🔄 Starting client clustering with {num_clusters} clusters using {distance_metric.upper()}...")
     
-    n = NUM_CLIENTS
+    n_clients = NUM_CLIENTS
+    n_classes = NUM_CLASSES
 
     # Helper to map Edge Name -> ID for "DefaultClusterID"
     edge_server_list = topology_info.get('edge_servers', []) if topology_info else []
     edge_name_to_id = {name: i+1 for i, name in enumerate(edge_server_list)} # 1-based index to match cluster IDs often used
 
     # Step 1: Load all client data distributions
-    print(f"📦 Loading distributions for {n} clients...")
+    print(f"📦 Loading distributions for {n_clients} clients...")
     partition_data = []
     pid_to_clientname = {}
     if topology_info is not None:
         pid_to_clientname = topology_info.get('pid_to_clientname', {})
     
-    for pid in range(n):
+    for pid in range(n_clients):
         trainloader, _, _ = load_datasets(partition_id=pid)
         summary = get_dataloader_summary(trainloader)
         dist_counts_map = summary['label_distribution']
         num_items = summary['num_items']
         
         # Create counts vector
-        counts_vector = np.zeros(n)
+        counts_vector = np.zeros(n_classes)
         if num_items > 0:
             for label_str, count in dist_counts_map.items():
                 label_int = int(label_str)
-                if 0 <= label_int < n:
+                if 0 <= label_int < n_classes:
                     counts_vector[label_int] = count
         
         # Store both counts and normalized distribution
@@ -189,7 +194,7 @@ def cluster_clients_by_distribution(num_clusters, distance_metric='emd', save_di
         edge_to_cluster_id = {edge: i+1 for i, edge in enumerate(edge_servers)}
         
         # Assign clients to clusters based on their static edge connection
-        for pid in range(n):
+        for pid in range(n_clients):
             client_name = pid_to_clientname.get(pid)
             if client_name:
                 edge = topology_info['client_info'][client_name]['edge_server']
@@ -200,24 +205,25 @@ def cluster_clients_by_distribution(num_clusters, distance_metric='emd', save_di
 
         print(f"cluster_assignments: {cluster_assignments}")
         # Dummy matrices for return values
-        dist_matrix = np.zeros((n, n))
-        linkage_matrix = np.zeros((n, 4))
-        if (pid + 1) % 10 == 0 or pid == n - 1:
-            print(f"  Loaded {pid + 1}/{n} partitions...")
+        dist_matrix = np.zeros((n_clients, n_clients))
+        linkage_matrix = np.zeros((n_clients, 4))
+        if (pid + 1) % 10 == 0 or pid == n_clients - 1:
+            print(f"  Loaded {pid + 1}/{n_clients} partitions...")
     
     # --- CASE: DYNAMIC CLUSTERING ---
     else:
         # Step 2: Calculate pairwise distance matrix
         print(f"\n📏 Calculating pairwise distances using {distance_metric.upper()}...")
         
-        dist_matrix = np.zeros((n, n))
-        num_classes = NUM_CLASSES
+        dist_matrix = np.zeros((n_clients, n_clients))
+        linkage_matrix = np.zeros((n_clients, 4))
+        X = np.array([pd['distribution'] for pd in partition_data])  # (n_clients, n_classes)
         
         if distance_metric == 'emd':
             # EMD using Wasserstein distance (1D Earth Mover's Distance)
-            class_indices = np.arange(num_classes)
-            for i in range(num_classes):
-                for j in range(i + 1, num_classes):
+            class_indices = np.arange(n_classes)
+            for i in range(n_clients):
+                for j in range(i + 1, n_clients):
                     dist = wasserstein_distance(
                         class_indices, class_indices,
                         partition_data[i]['distribution'],
@@ -228,8 +234,8 @@ def cluster_clients_by_distribution(num_clusters, distance_metric='emd', save_di
         
         elif distance_metric == 'jsd':
             # Jensen-Shannon Divergence
-            for i in range(num_classes):
-                for j in range(i + 1, num_classes):
+            for i in range(n_clients):
+                for j in range(i + 1, n_clients):
                     # Add small epsilon to avoid log(0)
                     p = partition_data[i]['distribution'] + 1e-10
                     q = partition_data[j]['distribution'] + 1e-10
@@ -237,24 +243,60 @@ def cluster_clients_by_distribution(num_clusters, distance_metric='emd', save_di
                     dist_matrix[i, j] = dist
                     dist_matrix[j, i] = dist
         
+        elif distance_metric == 'cosine':
+            for i in range(n_clients):
+                for j in range(i + 1, n_clients):
+                    dist = cosine(partition_data[i]['distribution'], 
+                                 partition_data[j]['distribution'])
+                    dist_matrix[i, j] = dist
+                    dist_matrix[j, i] = dist
+        
+        elif distance_metric == 'euclidean':
+            for i in range(n_clients):
+                for j in range(i + 1, n_clients):
+                    dist = euclidean(partition_data[i]['distribution'], 
+                                    partition_data[j]['distribution'])
+                    dist_matrix[i, j] = dist
+                    dist_matrix[j, i] = dist
+        
+        elif distance_metric == 'manhattan':
+            for i in range(n_clients):
+                for j in range(i + 1, n_clients):
+                    dist = cityblock(partition_data[i]['distribution'], 
+                                    partition_data[j]['distribution'])
+                    dist_matrix[i, j] = dist
+                    dist_matrix[j, i] = dist
+        
+        elif distance_metric == 'gmm':
+            gmm = GaussianMixture(n_components=num_clusters, random_state=42, n_init=10)
+            cluster_labels = gmm.fit_predict(X)
+            print(f" GMM log-likelihood: {gmm.score(X):.4f}")
+        
+        elif distance_metric == 'kmeans':
+            kmeans = KMeans(n_clusters=num_clusters, random_state=42, n_init=10)
+            cluster_labels = kmeans.fit_predict(X)
+            print(f" K-means inertia: {kmeans.inertia_:.4f}")
+        
         else:
             raise ValueError(f"Unknown distance metric: {distance_metric}")
         
         print(f"  Distance matrix shape: {dist_matrix.shape}")
         print(f"  Distance range: [{dist_matrix[dist_matrix > 0].min():.4f}, {dist_matrix.max():.4f}]")
     
-    # Step 3: Perform hierarchical clustering
-    print(f"\n🌳 Performing hierarchical clustering...")
-    condensed_dist_matrix = dist_matrix[np.triu_indices(n, k=1)]
-    if len(condensed_dist_matrix) > 0 and distance_metric != 'none':
+    # Step 3: Perform clustering
+    print(f"\n🌳 Performing clustering...")
+    if distance_metric in ['gmm', 'kmeans']:
+            # Use pre-computed labels
+            pass
+    else:
+        condensed_dist_matrix = dist_matrix[np.triu_indices(n_clients, k=1)]
+        if len(condensed_dist_matrix) > 0 and distance_metric != 'none':
             linkage_matrix = linkage(condensed_dist_matrix, method='average')
             cluster_labels = fcluster(linkage_matrix, num_clusters, criterion='maxclust')
-    elif distance_metric == 'none' or distance_metric is None:
-        linkage_matrix = np.zeros((n, 4))
-        cluster_labels = cluster_assignments.values()
-    else:
-        linkage_matrix = np.zeros((n, 4))
-        cluster_labels = [1] * n
+        elif distance_metric == 'none' or distance_metric is None:
+            cluster_labels = cluster_assignments.values()
+        else:
+            cluster_labels = [1] * n_clients
     print(f"  Cluster labels assigned: {cluster_labels}")
     clusters = defaultdict(list)
     for pid, cluster_id in enumerate(cluster_labels):
@@ -274,7 +316,7 @@ def cluster_clients_by_distribution(num_clusters, distance_metric='emd', save_di
     # --- GENERATE REPORTS (Shared logic) ---
     print("  Generating distribution CSVs...")
     pre_cluster_rows = []
-    for pid in range(n):
+    for pid in range(n_clients):
         client_name = pid_to_clientname.get(pid, f"Client-{pid}")
         row = {
             'ClientName': client_name,
@@ -282,7 +324,7 @@ def cluster_clients_by_distribution(num_clusters, distance_metric='emd', save_di
             'DefaultClusterID': partition_data[pid]['default_cluster_id'],
             'TotalSamples': int(partition_data[pid]['total']),
         }
-        for class_idx in range(n):
+        for class_idx in range(n_classes):
             row[f'Class_{class_idx}'] = int(partition_data[pid]['counts'][class_idx])
         pre_cluster_rows.append(row)
     
@@ -290,7 +332,7 @@ def cluster_clients_by_distribution(num_clusters, distance_metric='emd', save_di
     
     # Post-clustering: new assignments based on clustering
     post_cluster_rows = []
-    for logical_id in range(n):
+    for logical_id in range(n_clients):
         assigned_id = partition_mapping.get(logical_id, logical_id)
         # If dynamic, logical ID implies position in sorted list, so cluster ID matches
         # If static, logical ID is just ID, lookup cluster assignment
@@ -317,11 +359,11 @@ def cluster_clients_by_distribution(num_clusters, distance_metric='emd', save_di
     unique_clusters = sorted(list(set(cluster_assignments.values())))
     cluster_aggregate_rows = []
     for c_id in unique_clusters:
-        cluster_counts = np.zeros(n)
+        cluster_counts = np.zeros(n_classes)
         total_samples = 0
         member_clients = []
         
-        for log_id in range(n):
+        for log_id in range(n_clients):
             if cluster_assignments.get(log_id) == c_id:
                 phys_id = partition_mapping.get(log_id, log_id)
                 cluster_counts += partition_data[phys_id]['counts']

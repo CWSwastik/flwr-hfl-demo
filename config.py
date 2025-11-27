@@ -13,7 +13,7 @@ DIRICHLET_ALPHA = 0.1
 NUM_CLASSES_PER_PARTITION = 3  # used in pathological partitioning (limit label)
 NUM_CLASSES = 10  # total number of classes in the dataset
 
-CLUSTER_STRATEGY = "none" # options: "none", "emd", "jsd"
+CLUSTER_STRATEGY = "none" # options: "none", "emd", "jsd", "gmm", "kmeans"
 
 GRADIENT_CORRECTION_BETA = 1
 
