@@ -17,7 +17,7 @@ from sklearn.mixture import GaussianMixture
 from sklearn.cluster import KMeans
 
 rand_seed = 42
-np.random.seed(rand_seed=42)
+np.random.seed(seed=42)
 
 def parse_topology_for_clustering(topology_file_path):
     """
