@@ -552,8 +552,6 @@ def spawn_processes():
             elif kind == "edge":
                 # STRICT COUNT: defaults to 0 if not in list, preventing hangs on unused edges
                 required_clients = edge_client_counts.get(name, 0)
-                if required_clients == 0:
-                    print(f"⚠️ Edge server {name} has 0 assigned clients. It is not invoked to prevent hangs.")
                 cmd = (
                     f'py "{get_abs_path("edge_server.py")}" --server '
                     f'{cfg["server"]["host"]}:{cfg["server"]["port"]} --client '

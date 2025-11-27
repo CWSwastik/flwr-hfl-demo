@@ -207,7 +207,6 @@ def cluster_clients_by_distribution(num_clusters, distance_metric='emd', save_di
         # Dummy matrices for return values
         dist_matrix = np.zeros((n_clients, n_clients))
         linkage_matrix = np.zeros((n_clients, 4))
-        cluster_labels = list(cluster_assignments.values())
         if (pid + 1) % 10 == 0 or pid == n_clients - 1:
             print(f"  Loaded {pid + 1}/{n_clients} partitions...")
     
@@ -282,8 +281,7 @@ def cluster_clients_by_distribution(num_clusters, distance_metric='emd', save_di
             raise ValueError(f"Unknown distance metric: {distance_metric}")
         
         print(f"  Distance matrix shape: {dist_matrix.shape}")
-        if distance_metric not in ['gmm', 'kmeans']:
-            print(f" Distance range: [{dist_matrix[dist_matrix > 0].min():.4f}, {dist_matrix.max():.4f}]")
+        print(f"  Distance range: [{dist_matrix[dist_matrix > 0].min():.4f}, {dist_matrix.max():.4f}]")
     
     # Step 3: Perform clustering
     print(f"\n🌳 Performing clustering...")
