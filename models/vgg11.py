@@ -50,3 +50,7 @@ class Net(nn.Module):
         x = torch.flatten(x, 1)
         x = self.classifier(x)
         return x
+
+if __name__ == "__main__":
+    net = Net()
+    print(net(torch.randn(1, 3, 32, 32)))

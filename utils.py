@@ -69,7 +69,14 @@ def load_datasets(partition_id: Optional[int] = None):
     def apply_transforms(batch):
         imgs = batch.get("img", batch.get("image"))
 
-        if "mnist" in DATASET:
+        if "fashion_mnist" in DATASET:
+            pytorch_transforms = transforms.Compose(
+                [
+                    transforms.ToTensor(),
+                    transforms.Normalize((0.5,), (0.5,)),  # Fashion_MNIST’s mean/std
+                ]
+            )
+        elif "mnist" in DATASET:
             pytorch_transforms = transforms.Compose(
                 [
                     transforms.ToTensor(),

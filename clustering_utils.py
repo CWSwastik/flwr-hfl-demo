@@ -68,8 +68,7 @@ def parse_topology_for_clustering(topology_file_path):
             
             # find the edge server this client connects to
             for edge_server in edge_servers_names:
-                if edge_servers_configs[edge_server].get('client')['host'] == host_ref and \
-                   edge_servers_configs[edge_server].get('client')['port'] == host_port:
+                if edge_servers_configs[edge_server].get('client')['host'] == host_ref and edge_servers_configs[edge_server].get('client')['port'] == host_port:
                     edge_to_clients[edge_server].append(name)
                     break
 
@@ -271,11 +270,13 @@ def cluster_clients_by_distribution(num_clusters, distance_metric='emd', save_di
         elif distance_metric == 'gmm':
             gmm = GaussianMixture(n_components=num_clusters, random_state=rand_seed, n_init=10)
             cluster_labels = gmm.fit_predict(X)
+            cluster_labels = cluster_labels + 1 # making clusters 1 indexed
             print(f" GMM log-likelihood: {gmm.score(X):.4f}")
         
         elif distance_metric == 'kmeans':
             kmeans = KMeans(n_clusters=num_clusters, random_state=rand_seed, n_init=10)
             cluster_labels = kmeans.fit_predict(X)
+            cluster_labels = cluster_labels + 1 # making clusters 1 indexed
             print(f" K-means inertia: {kmeans.inertia_:.4f}")
         
         else:
