@@ -196,7 +196,8 @@ class EdgeStrategy(fl.server.strategy.FedAvg):
         print(
             f"[Edge Server] Evaluate Round {server_round}: Loss = {loss}, Accuracy = {accuracy}"
         )
-        return super().evaluate(server_round, parameters)
+        # return super().evaluate(server_round, parameters) # This is returning None
+        return float(loss), {"accuracy": float(accuracy)}
 
 
     def configure_fit(self, server_round, parameters, client_manager, **kwargs):
@@ -303,6 +304,7 @@ def run_edge_as_client(shared_state):
             server_process = multiprocessing.Process(
                 target=run_edge_server,
                 args=(self.shared_state, parameters, config["round"]),
+                # daemon=True,
             )
             server_process.start()
             server_process.join()

@@ -195,7 +195,8 @@ class FedAvgWithGradientCorrection(fl.server.strategy.FedAvg):
         print(
             f"[Central Server] Evaluate Round {server_round}: Loss = {loss}, Accuracy = {accuracy}"
         )
-        return super().evaluate(server_round, parameters)
+        # return super().evaluate(server_round, parameters) # This is returning None
+        return float(loss), {"accuracy": float(accuracy)}
 
     def aggregate_evaluate(self, server_round, results, failures):
         """Log loss values after each round."""
