@@ -28,7 +28,9 @@ from config import (
     TRAINING_SCHEDULER_STEP_SIZE,
     DASHBOARD_SERVER_URL,
     ENABLE_DASHBOARD,
-    EXPERIMENT_NAME
+    EXPERIMENT_NAME,
+    LOCAL_EPOCHS,
+    SEED
 )
 
 import importlib
@@ -40,6 +42,7 @@ import sys, traceback
 from torch.optim import Adam
 from torch.optim.lr_scheduler import StepLR
 
+torch.manual_seed(SEED)
 
 parser = argparse.ArgumentParser(description="Start a Flower client.")
 parser.add_argument(
@@ -105,6 +108,7 @@ class FlowerClient(fl.client.NumPyClient):
         zi = json.loads(config.get("zi", "{}"))
         yi = json.loads(config.get("yi", "{}"))
         beta = config.get("beta", GRADIENT_CORRECTION_BETA)
+        local_epochs = config.get("local_epochs", LOCAL_EPOCHS)
 
         # convert numpy arrays -> torch tensors on correct device
         device = next(self.net.parameters()).device
@@ -114,7 +118,7 @@ class FlowerClient(fl.client.NumPyClient):
         # --- train with gradient correction ---
         losses, accuracies, gradients = train_with_zi_yi(
             self.net, self.trainloader, self.optimizer,
-            epochs=1, beta=beta, zi=zi, yi=yi
+            epochs=local_epochs, beta=beta, zi=zi, yi=yi
         )
 
         # --- logging ---
@@ -125,11 +129,17 @@ class FlowerClient(fl.client.NumPyClient):
             "data_samples": len(self.trainloader.dataset),
         })
 
-        # convert gradients to numpy before sending back
-        grads_numpy = {k: v.cpu().numpy().tolist() for k, v in gradients.items()}
-        grads_json = json.dumps(grads_numpy)
+        model_params_list = get_parameters(self.net)
+        grads_list = []
+        for name, p in self.net.named_parameters():
+            if p.requires_grad:
+                g_numpy = gradients[name].cpu().numpy()
+                grads_list.append(g_numpy)
+        
+        # concat gradients after model parameters to use Flower's built-in parameter passing
+        packed_params = model_params_list + grads_list
 
-        return get_parameters(self.net), len(self.trainloader.dataset), {"gradients": grads_json}
+        return packed_params, len(self.trainloader.dataset), {"model_length": len(model_params_list)}
     
     def evaluate(self, parameters, config):
         set_parameters(self.net, parameters)

@@ -4,13 +4,15 @@ import sys
 import traceback
 import flwr as fl
 from flwr.server import ServerConfig
-from flwr.common import parameters_to_ndarrays, ndarrays_to_parameters, FitIns
+from flwr.common import parameters_to_ndarrays, ndarrays_to_parameters, FitIns, FitRes, Parameters, Status, Code
 import numpy as np
 import multiprocessing
 import argparse
 from logger import Logger
-from utils import load_datasets, set_parameters, test, log_to_dashboard
-from config import MODEL, MIN_CLIENTS_PER_EDGE, GRADIENT_CORRECTION_BETA, ENABLE_DASHBOARD
+from utils import load_datasets, set_parameters, test, log_to_dashboard, get_parameters
+from config import MODEL, MIN_CLIENTS_PER_EDGE, GRADIENT_CORRECTION_BETA, ENABLE_DASHBOARD, SEED
+import gc
+import pickle
 
 parser = argparse.ArgumentParser(description="Start a Flower Edge Server.")
 parser.add_argument(
@@ -48,49 +50,81 @@ logger = Logger(
     init_file=False,
 )
 
+np.random.seed(seed=SEED)
 
 class EdgeStrategy(fl.server.strategy.FedAvg):
     def __init__(self, shared_state, round, **kwargs):
         super().__init__(**kwargs)
         self.shared_state = shared_state
         self.round = round
+        model_module = importlib.import_module(f"models.{MODEL}")
+        ref_net = model_module.Net()
+        self.num_model_layers = len(get_parameters(ref_net))
+        self.grad_names = [n for n, p in ref_net.named_parameters() if p.requires_grad]
 
     def aggregate_fit(self, rnd, results, failures):
         print(f"[Edge Server {args.name}] Aggregating fit results at round {rnd}.")
         
+        # intercepting results to extract gradients
+        valid_results = []
+        client_grads = []
+        clients_list = []
+
+        for client, fit_res in results:
+            # 1. Convert packed parameters to NumPy
+            packed_params = parameters_to_ndarrays(fit_res.parameters)
+            
+            # 2. SLICE the list [ Weights (0 to N) | Gradients (N to end) ]
+            weights = packed_params[:self.num_model_layers]
+            raw_grads = packed_params[self.num_model_layers:]
+            
+            # 3. Reconstruct Gradient Dictionary map the raw arrays back to their names: {'conv1.weight': array, ...}
+            c_grad_dict = dict(zip(self.grad_names, raw_grads))
+            client_grads.append(c_grad_dict)
+            clients_list.append(client)
+            
+            # 4. Create a clean FitRes with ONLY weights for the standard FedAvg aggregator
+            # This ensures the standard Flower logic doesn't get confused by the extra gradient data
+            new_fit_res = FitRes(
+                status=fit_res.status,
+                parameters=ndarrays_to_parameters(weights), # Send only weights to super
+                num_examples=fit_res.num_examples,
+                metrics=fit_res.metrics,
+            )
+            valid_results.append((client, new_fit_res))
+        
         aggregated_parameters = super().aggregate_fit(rnd, results, failures)
         
         if aggregated_parameters is not None:
-            self.shared_state["aggregated_model"] = aggregated_parameters
+            self.shared_state["aggregated_model"] = aggregated_parameters[0]
             examples = [r.num_examples for _, r in results]
             self.shared_state["num_examples"] = sum(examples)
 
-            clients = [client for client, _ in results]
-            # Already lists from client JSON
-            client_grads = [json.loads(r.metrics["gradients"]) for _, r in results]
-
-            # Compute average gradient (still NumPy temporarily)
+            # Compute average gradient (NumPy)
             avg_grad = {}
             for name in client_grads[0]:
                 avg_grad[name] = np.mean([cg[name] for cg in client_grads], axis=0)
 
-            # Convert avg_grad to lists for shared_state
-            avg_grad_serializable = {name: grad.tolist() for name, grad in avg_grad.items()}
-
             # Compute zi_per_client as differences
             zi_per_client = {}
-            for client, grads in zip(clients, client_grads):
+            for client, grads in zip(clients_list, client_grads):
                 client_id_str = getattr(client, "cid", str(client))
                 zi_per_client[client_id_str] = {name: (avg_grad[name] - grads[name]).tolist()
                                     for name in grads}
 
             # Store safely in shared_state
             # print(zi_per_client, avg_grad_serializable)
-            self.shared_state["zi_per_client"] = json.dumps(zi_per_client)
-            self.shared_state["group_avg_grad"] = json.dumps(avg_grad_serializable)
-
+            self.shared_state["zi_per_client"] = pickle.dumps(zi_per_client)
+            self.shared_state["group_avg_grad"] = pickle.dumps(avg_grad)
+            
             print(f"[Edge Server] Computed zi for {len(zi_per_client)} clients.")
             print(f"[Edge Server] Aggregated model at round {rnd}.")
+
+            del client_grads
+            del valid_results
+            del avg_grad
+            del zi_per_client
+            gc.collect()
 
         return aggregated_parameters
 
@@ -175,18 +209,19 @@ class EdgeStrategy(fl.server.strategy.FedAvg):
         )
 
         # yi is received from central server, stored in shared_state
-        yi = self.shared_state.get(
-            "yi", {name: 0.0 for name in self.shared_state.get("group_avg_grad", {})}
-        )
+        yi_blob = self.shared_state.get("yi", None)
+        yi = {}
+        if isinstance(yi_blob, bytes):
+            yi = pickle.loads(yi_blob)
+        else:
+            yi = yi_blob if yi_blob is not None else {}
 
-        if isinstance(yi, str):
-            yi = json.loads(yi)
-
-
-        # zi values computed in aggregate_fit
-        zi_per_client = self.shared_state.get("zi_per_client", {})
-        if isinstance(zi_per_client, str):
-            zi_per_client = json.loads(zi_per_client)
+        zi_blob = self.shared_state.get("zi_per_client", None)
+        zi_per_client = {}
+        if zi_blob:
+            zi_per_client = pickle.loads(zi_blob)
+        
+            
 
         beta = GRADIENT_CORRECTION_BETA
 
@@ -195,24 +230,32 @@ class EdgeStrategy(fl.server.strategy.FedAvg):
         for client, fit_ins in fit_instructions:
             cid = getattr(client, "cid", None)
 
-            # Default zi if missing
-            if zi_per_client:
-                client_zi = zi_per_client.get(
-                    cid, {name: 0.0 for name in zi_per_client[next(iter(zi_per_client))]}
-                )
-            else:
-                client_zi = {name: 0.0 for name in yi}
+            client_zi = zi_per_client.get(cid, None)
+            if client_zi is None and zi_per_client:
+                 # Fallback logic
+                 first = next(iter(zi_per_client.values()))
+                 client_zi = {k: np.zeros_like(v) for k,v in first.items()}
+            elif client_zi is None:
+                 client_zi = {}
 
             cfg = fit_ins.config.copy()
+
+            def to_list_dict(d):
+                return {k: v.tolist() if isinstance(v, np.ndarray) else v for k, v in d.items()}
+
             cfg.update({
                 "round": server_round,
-                "zi": json.dumps(client_zi),
-                "yi": json.dumps(yi),
+                "zi": json.dumps(to_list_dict(client_zi)),
+                "yi": json.dumps(to_list_dict(yi)),
                 "beta": beta,
                 "cid": cid,
             })
 
             new_fit_instructions.append((client, FitIns(fit_ins.parameters, cfg)))
+            
+        del zi_per_client
+        del yi
+        gc.collect()
 
         print(f"Prepared {len(new_fit_instructions)} fit instructions")
         return new_fit_instructions
@@ -250,7 +293,11 @@ def run_edge_as_client(shared_state):
             print(f"[Edge Client {args.name}] Received model from central server.")
             # print(config)
 
-            self.shared_state["yi"] = config["yi"] # do not json.loads this right now, it will be loaded later
+            # self.shared_state["yi"] = json.loads(config["yi"])
+
+            yi_dict = json.loads(config["yi"]) # Received as JSON from Central Server
+            yi_numpy = {k: np.array(v) for k,v in yi_dict.items()}
+            self.shared_state["yi"] = pickle.dumps(yi_numpy)
 
             # Start the edge server process for local aggregation
             server_process = multiprocessing.Process(
@@ -264,10 +311,28 @@ def run_edge_as_client(shared_state):
 
             if agg_model is not None:
                 num_examples = self.shared_state.get("num_examples")
-                res = parameters_to_ndarrays(agg_model[0])
-                print(f"[Edge Client {args.name}] Sending model to central server.")
-                group_avg_grad = self.shared_state.get("group_avg_grad")
-                return res, num_examples, {"gradients": group_avg_grad}
+                edge_weights = parameters_to_ndarrays(agg_model)
+                grad_blob = self.shared_state.get("group_avg_grad")
+                group_avg_grad_dict = pickle.loads(grad_blob)
+                model_module = importlib.import_module(f"models.{MODEL}")
+                ref_net = model_module.Net()
+                grad_list = []
+                for name, p in ref_net.named_parameters():
+                    if p.requires_grad and name in group_avg_grad_dict:
+                        # Convert list back to numpy if needed, or keep as list
+                        grad_list.append(np.array(group_avg_grad_dict[name]))
+                
+                # 4. Pack Weights + Gradients
+                packed_params = edge_weights + grad_list
+
+                del edge_weights
+                del group_avg_grad_dict
+                gc.collect()
+                
+                print(f"[Edge Client {args.name}] Sending PACKED model to central server.")
+                
+                # Return packed parameters. Metrics is empty!
+                return packed_params, num_examples, {}
             else:
                 # something broke
                 default = [np.array([0.0, 0.0, 0.0, 0.0])]

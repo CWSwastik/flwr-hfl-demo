@@ -7,6 +7,9 @@ MIN_CLIENTS_PER_EDGE = 10
 MODEL = "lenet_mnist"
 DATASET = "mnist"
 
+SEED = 42
+
+LOCAL_EPOCHS = 1
 BATCH_SIZE = 16
 PARTITIONER = "dirichlet" # options: "iid", "dirichlet", "pathological"
 DIRICHLET_ALPHA = 0.1

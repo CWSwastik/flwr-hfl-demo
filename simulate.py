@@ -548,7 +548,7 @@ def spawn_processes():
         for name, cfg in sorted_topo.items():
             kind = cfg.get("kind")
             if kind == "server":
-                cmd = f'py "{get_abs_path("central_server.py")}" {cfg["host"]}:{cfg["port"]} --exp_id {EXP_ID} --min_edges {min_edges} --enable_dashboard {config.ENABLE_DASHBOARD}'
+                cmd = f'py "{get_abs_path("central_server.py")}" {cfg["host"]}:{cfg["port"]} --exp_id {EXP_ID} --min_edges {min_edges}'
             elif kind == "edge":
                 # STRICT COUNT: defaults to 0 if not in list, preventing hangs on unused edges
                 required_clients = edge_client_counts.get(name, 0)
@@ -580,7 +580,7 @@ def spawn_processes():
         for name, cfg in sorted_topo.items():
             kind = cfg.get("kind")
             if kind == "server":
-                cmd = f'python "{get_abs_path("central_server.py")}" {cfg["host"]}:{cfg["port"]} --exp_id {EXP_ID} --min_edges {min_edges} --enable_dashboard {config.ENABLE_DASHBOARD}'
+                cmd = f'python "{get_abs_path("central_server.py")}" {cfg["host"]}:{cfg["port"]} --exp_id {EXP_ID} --min_edges {min_edges}'
             elif kind == "edge":
                 required_clients = edge_client_counts.get(name, 0)
                 if required_clients == 0:

@@ -19,8 +19,13 @@ from flwr_datasets.partitioner import (
 )
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-# print(f"Training on {DEVICE}")
-# print(f"Flower {flwr.__version__} / PyTorch {torch.__version__}")
+print(f"Training on {DEVICE}")
+print(f"Flower {flwr.__version__} / PyTorch {torch.__version__}")
+
+print("Available devices:")
+if torch.cuda.is_available():
+    for i in range(torch.cuda.device_count()):
+        print(i, torch.cuda.get_device_name(i))
 
 from config import (
     NUM_CLIENTS,
@@ -63,8 +68,8 @@ def load_datasets(partition_id: Optional[int] = None):
 
     fds = FederatedDataset(dataset=DATASET, partitioners={"train": partitioner})
     partition = fds.load_partition(pid)
-    # Divide data on each node: 80% train, 20% test
-    partition_train_test = partition.train_test_split(test_size=0.2, seed=42)
+    # No need for validation
+    partition_train_test = partition.train_test_split(test_size=0.1, seed=42)
 
     def apply_transforms(batch):
         imgs = batch.get("img", batch.get("image"))
@@ -99,8 +104,9 @@ def load_datasets(partition_id: Optional[int] = None):
 
     # Create train/val for each partition and wrap it into DataLoader
     partition_train_test = partition_train_test.with_transform(apply_transforms)
+    train_partition = partition.with_transform(apply_transforms) 
     trainloader = DataLoader(
-        partition_train_test["train"], batch_size=BATCH_SIZE, shuffle=True
+        train_partition, batch_size=BATCH_SIZE, shuffle=True
     )
     valloader = DataLoader(partition_train_test["test"], batch_size=BATCH_SIZE)
     testset = fds.load_split("test").with_transform(apply_transforms)
@@ -215,7 +221,8 @@ def test(net, testloader):
 
 def set_parameters(net, parameters: List[np.ndarray]):
     params_dict = zip(net.state_dict().keys(), parameters)
-    state_dict = OrderedDict({k: torch.Tensor(v) for k, v in params_dict})
+    # torch.Tensor -> float and torch.tensor -> int or long; preserves type so that num_batches_tracked BatchNorm could work 
+    state_dict = OrderedDict({k: torch.tensor(v) for k, v in params_dict})
     net.load_state_dict(state_dict, strict=True)
 
 

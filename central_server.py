@@ -5,12 +5,12 @@ from flwr.server import ServerConfig
 import argparse
 import matplotlib.pyplot as plt
 import numpy as np
-from config import NUM_ROUNDS, MODEL
+from config import NUM_ROUNDS, MODEL, SEED
 from logger import Logger
 from utils import log_to_dashboard
 
-from utils import set_parameters, test, load_datasets
-from flwr.common import parameters_to_ndarrays, FitIns
+from utils import set_parameters, test, load_datasets, log_to_dashboard, get_parameters
+from flwr.common import parameters_to_ndarrays, FitIns, ndarrays_to_parameters, FitRes
 
 parser = argparse.ArgumentParser(description="Start the Flower central server.")
 parser.add_argument(
@@ -44,6 +44,8 @@ logger = Logger(
 
 server_address = args.address
 
+np.random.seed(seed=SEED)
+
 class FedAvgWithGradientCorrection(fl.server.strategy.FedAvg):
     def __init__(self, min_fit_clients, min_available_clients):
         super().__init__(
@@ -53,18 +55,51 @@ class FedAvgWithGradientCorrection(fl.server.strategy.FedAvg):
             on_evaluate_config_fn=lambda rnd: {"round": rnd},
         )
         self.yi_per_group = {}  # store yi for each group/edge
+        # Calculate the split index for weights vs gradients
+        model_module = importlib.import_module(f"models.{MODEL}")
+        ref_net = model_module.Net()
+        self.num_model_layers = len(get_parameters(ref_net))
+        self.grad_names = [n for n, p in ref_net.named_parameters() if p.requires_grad]
 
     def aggregate_fit(self, rnd, results, failures):
-        aggregated_parameters = super().aggregate_fit(rnd, results, failures)
-        # print(aggregated_parameters, rnd, results, failures)
+
+        valid_results = []
+        group_grads = [] # Stores the gradient dictionaries from edges
+        clients_list = []
+
+        for client, fit_res in results:
+            # 1. Unpack
+            packed_params = parameters_to_ndarrays(fit_res.parameters)
+            
+            # 2. Slice: Weights [0 : N] | Gradients [N : end]
+            weights = packed_params[:self.num_model_layers]
+            raw_grads = packed_params[self.num_model_layers:]
+            
+            # 3. Reconstruct Gradient Dictionary
+            # The edge server sent its 'group_avg_grad' as the packed gradients
+            edge_grad_dict = dict(zip(self.grad_names, raw_grads))
+            group_grads.append(edge_grad_dict)
+            clients_list.append(client)
+
+            # 4. Create CLEAN FitRes (Weights only) for standard FedAvg
+            new_fit_res = FitRes(
+                status=fit_res.status,
+                parameters=ndarrays_to_parameters(weights),
+                num_examples=fit_res.num_examples,
+                metrics=fit_res.metrics,
+            )
+            valid_results.append((client, new_fit_res))
+        
+        # --- STANDARD AGGREGATION (Weights Only) ---
+        aggregated_parameters = super().aggregate_fit(rnd, valid_results, failures)
+
 
         if aggregated_parameters is not None and results:
-            # Each result.metrics["gradients"] contains group_avg_grad from edge
-            group_grads = [json.loads(r.metrics["gradients"]) for _, r in results]
 
             # Average across all groups (edges)
             global_avg_grad = {}
-            for name in group_grads[0]:
+            for name in self.grad_names:
+            # for name in group_grads[0]:
                 global_avg_grad[name] = np.mean([gg[name] for gg in group_grads], axis=0)
 
             # Convert global_avg_grad to lists (JSON-safe)
@@ -72,7 +107,8 @@ class FedAvgWithGradientCorrection(fl.server.strategy.FedAvg):
 
             # Compute yi for each group: yi_j = global_avg_grad - group_avg_grad_j
             yi_per_group = {}
-            for (client, _), group_grad in zip(results, group_grads):
+            for client, group_grad in zip(clients_list, group_grads):
+            # for (client, _), group_grad in zip(results, group_grads):
                 client_id = getattr(client, "cid", None)
                 yi_per_group[client_id] = {name: (global_avg_grad[name] - group_grad[name]).tolist()
                                         for name in group_grad}
@@ -105,7 +141,7 @@ class FedAvgWithGradientCorrection(fl.server.strategy.FedAvg):
 
             # Fetch yi from yi_per_group
             yi = self.yi_per_group.get(
-                cid, {name: 0.0 for name in cfg.get("zi", {})}
+                cid, {name: 0.0 for name in self.grad_names} #cfg.get("zi", {})}
             )
 
             # Add yi to config
@@ -180,7 +216,7 @@ class FedAvgWithGradientCorrection(fl.server.strategy.FedAvg):
             f"[Central Server] Round {server_round}: Average Loss = {aggregated_loss}"
         )
         print(
-            f"[Central Server] Round {server_round}: Average Accuracy = {sum(accuracies) / sum(examples)}"
+            f"[Central Server] Round {server_round}: Average Accuracy = {aggregated_accuracy}"
         )
 
         return float(aggregated_loss), {"accuracy": float(aggregated_accuracy)}
