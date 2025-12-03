@@ -3,6 +3,7 @@ import subprocess
 import shutil
 import os
 import re
+import time
 
 CONFIG_FILE = "config.py"
 BACKUP_FILE = "config_backup.py"
@@ -49,6 +50,7 @@ def main():
 
     original_config = read_config()
 
+    # ToDo: Accept experiments file as cli argument
     with open("experiments.json", "r") as f:
         experiments = json.load(f)
 
@@ -62,6 +64,8 @@ def main():
         write_config(new_config)
 
         run_simulation()
+        print((f" Finished Experiment {i+1}/{len(experiments)}, starting next exp in 5 sec"))
+        time.sleep(5)
 
     print("\nAll experiments finished! Restoring config.py")
 

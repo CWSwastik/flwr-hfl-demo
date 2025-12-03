@@ -12,6 +12,7 @@ from utils import (
     set_parameters,
     train,
     train_with_zi_yi,
+    train_fedprox,
     test,
     DEVICE,
     get_dataloader_summary,
@@ -26,6 +27,8 @@ from config import (
     TRAINING_WEIGHT_DECAY,
     TRAINING_SCHEDULER_GAMMA,
     TRAINING_SCHEDULER_STEP_SIZE,
+    TRAINING_STRATEGY,
+    FedProx_MU,
     DASHBOARD_SERVER_URL,
     ENABLE_DASHBOARD,
     EXPERIMENT_NAME,
@@ -112,14 +115,26 @@ class FlowerClient(fl.client.NumPyClient):
 
         # for non-gradient-correction training
         if beta == 0:
-            # 1. Use the simple train() function (No Gradient Accumulation overhead)
-            losses, accuracies = train(
-                self.net, self.trainloader, self.optimizer, epochs=local_epochs
-            )
-            
-            # 2. Return ONLY weights (Standard Flower behavior)
-            # No packing, no gradients.
-            return get_parameters(self.net), len(self.trainloader.dataset), {}
+            if TRAINING_STRATEGY == "fedavg":
+                # 1. Use the simple train() function (No Gradient Accumulation overhead)
+                print("Training with FedAvg...")
+                losses, accuracies = train(
+                    self.net, self.trainloader, self.optimizer, epochs=local_epochs
+                )
+                
+                # 2. Return ONLY weights (Standard Flower behavior)
+                # No packing, no gradients.
+                return get_parameters(self.net), len(self.trainloader.dataset), {}
+            elif TRAINING_STRATEGY == "fedprox":
+                # 1. Use the FedProx train function
+                print("Training with FedProx...")
+                losses, accuracies = train_fedprox(
+                    self.net, self.trainloader, self.optimizer, epochs=local_epochs, mu=FedProx_MU,
+                )
+                
+                # 2. Return ONLY weights (Standard Flower behavior)
+                # No packing, no gradients.
+                return get_parameters(self.net), len(self.trainloader.dataset), {}
 
         # convert numpy arrays -> torch tensors on correct device
         device = next(self.net.parameters()).device
