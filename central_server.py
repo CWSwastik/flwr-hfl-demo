@@ -5,7 +5,7 @@ from flwr.server import ServerConfig
 import argparse
 import matplotlib.pyplot as plt
 import numpy as np
-from config import NUM_ROUNDS, MODEL, SEED
+from config import NUM_ROUNDS, MODEL, SEED, GRADIENT_CORRECTION_BETA
 from logger import Logger
 from utils import log_to_dashboard
 
@@ -47,12 +47,13 @@ server_address = args.address
 np.random.seed(seed=SEED)
 
 class FedAvgWithGradientCorrection(fl.server.strategy.FedAvg):
-    def __init__(self, min_fit_clients, min_available_clients):
+    def __init__(self, min_fit_clients, min_available_clients, initial_parameters=None):
         super().__init__(
             min_fit_clients=min_fit_clients,
             min_available_clients=min_available_clients,
             on_fit_config_fn=lambda rnd: {"round": rnd},
             on_evaluate_config_fn=lambda rnd: {"round": rnd},
+            initial_parameters=initial_parameters,
         )
         self.yi_per_group = {}  # store yi for each group/edge
         # Calculate the split index for weights vs gradients
@@ -63,6 +64,10 @@ class FedAvgWithGradientCorrection(fl.server.strategy.FedAvg):
 
     def aggregate_fit(self, rnd, results, failures):
 
+        if GRADIENT_CORRECTION_BETA == 0:
+            # Standard aggregation only
+            return super().aggregate_fit(rnd, results, failures)
+        
         valid_results = []
         group_grads = [] # Stores the gradient dictionaries from edges
         clients_list = []
@@ -222,9 +227,17 @@ class FedAvgWithGradientCorrection(fl.server.strategy.FedAvg):
 
         return float(aggregated_loss), {"accuracy": float(aggregated_accuracy)}
     
-strategy = FedAvgWithGradientCorrection(min_fit_clients=min_edges, min_available_clients=min_edges)
+# strategy = FedAvgWithGradientCorrection(min_fit_clients=min_edges, min_available_clients=min_edges)
 
 if __name__ == "__main__":
+    model_module = importlib.import_module(f"models.{MODEL}")
+    net = model_module.Net()
+    init_params = ndarrays_to_parameters(get_parameters(net))
+    strategy = FedAvgWithGradientCorrection(
+        min_fit_clients=min_edges, 
+        min_available_clients=min_edges,
+        initial_parameters=init_params
+    )
     config = ServerConfig(num_rounds=NUM_ROUNDS)
     print(f"Starting central server at {server_address}")
     fl.server.start_server(

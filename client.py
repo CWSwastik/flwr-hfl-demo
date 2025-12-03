@@ -110,6 +110,17 @@ class FlowerClient(fl.client.NumPyClient):
         beta = config.get("beta", GRADIENT_CORRECTION_BETA)
         local_epochs = config.get("local_epochs", LOCAL_EPOCHS)
 
+        # for non-gradient-correction training
+        if beta == 0:
+            # 1. Use the simple train() function (No Gradient Accumulation overhead)
+            losses, accuracies = train(
+                self.net, self.trainloader, self.optimizer, epochs=local_epochs
+            )
+            
+            # 2. Return ONLY weights (Standard Flower behavior)
+            # No packing, no gradients.
+            return get_parameters(self.net), len(self.trainloader.dataset), {}
+
         # convert numpy arrays -> torch tensors on correct device
         device = next(self.net.parameters()).device
         zi = {k: torch.tensor(v, dtype=torch.float32, device=device) for k, v in zi.items()}

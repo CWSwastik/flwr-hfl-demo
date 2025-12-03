@@ -65,6 +65,20 @@ class EdgeStrategy(fl.server.strategy.FedAvg):
     def aggregate_fit(self, rnd, results, failures):
         print(f"[Edge Server {args.name}] Aggregating fit results at round {rnd}.")
         
+        if GRADIENT_CORRECTION_BETA == 0:
+            print(f"[Edge Server {args.name}] Aggregating (Standard FedAvg).")
+            
+            # for non-gradient correction the clients sent standard weights, so we can pass them directly to FedAvg
+            # No unpacking, no slicing, no Zi calculation.
+            aggregated_parameters = super().aggregate_fit(rnd, results, failures)
+            
+            if aggregated_parameters is not None:
+                self.shared_state["aggregated_model"] = aggregated_parameters[0]
+                examples = [r.num_examples for _, r in results]
+                self.shared_state["num_examples"] = sum(examples)
+            
+            return aggregated_parameters
+
         # intercepting results to extract gradients
         valid_results = []
         client_grads = []
@@ -288,15 +302,43 @@ def run_edge_as_client(shared_state):
             print(
                 f"[Edge Client {args.name}] No aggregated model available yet. Returning 0s."
             )
-            return [np.array([0.0, 0.0, 0.0])]
+            return [np.array([0.0])]
+            # return [np.array([0.0, 0.0, 0.0])]
+
 
         def fit(self, parameters, config):
             print(f"[Edge Client {args.name}] Received model from central server.")
-            # print(config)
+            
+            # --- 1. OPTIMIZATION FOR NO-GC (beta=0) ---
+            if GRADIENT_CORRECTION_BETA == 0:
+                # No Yi needed. No Gradients needed.
+                # Just pass standard config to Edge Server.
+                server_process = multiprocessing.Process(
+                    target=run_edge_server,
+                    args=(self.shared_state, parameters, config["round"]),
+                    daemon=True # Added Daemon for safety
+                )
+                server_process.start()
+                server_process.join()
+                
+                # Retrieve Standard Aggregated Model
+                agg_model = self.shared_state.get("aggregated_model")
+                if agg_model is not None:
+                    num_examples = self.shared_state.get("num_examples")
+                    edge_weights = parameters_to_ndarrays(agg_model)
+                    
+                    # Cleanup
+                    self.shared_state["aggregated_model"] = None
+                    gc.collect()
+                    
+                    print(f"[Edge Client {args.name}] Sending STANDARD model (No GC).")
+                    return edge_weights, num_examples, {}
+                else:
+                    return [], 0, {}
 
             # self.shared_state["yi"] = json.loads(config["yi"])
 
-            yi_dict = json.loads(config["yi"]) # Received as JSON from Central Server
+            yi_dict = json.loads(config.get("yi", "{}")) # Received as JSON from Central Server
             yi_numpy = {k: np.array(v) for k,v in yi_dict.items()}
             self.shared_state["yi"] = pickle.dumps(yi_numpy)
 
@@ -304,7 +346,7 @@ def run_edge_as_client(shared_state):
             server_process = multiprocessing.Process(
                 target=run_edge_server,
                 args=(self.shared_state, parameters, config["round"]),
-                # daemon=True,
+                daemon=True,
             )
             server_process.start()
             server_process.join()
@@ -314,8 +356,12 @@ def run_edge_as_client(shared_state):
             if agg_model is not None:
                 num_examples = self.shared_state.get("num_examples")
                 edge_weights = parameters_to_ndarrays(agg_model)
+                
+                # Load Gradients from Binary Blob
                 grad_blob = self.shared_state.get("group_avg_grad")
                 group_avg_grad_dict = pickle.loads(grad_blob)
+                
+                # Pack Weights + Gradients
                 model_module = importlib.import_module(f"models.{MODEL}")
                 ref_net = model_module.Net()
                 grad_list = []
@@ -329,6 +375,8 @@ def run_edge_as_client(shared_state):
 
                 del edge_weights
                 del group_avg_grad_dict
+                self.shared_state["aggregated_model"] = None
+                self.shared_state["group_avg_grad"] = None
                 gc.collect()
                 
                 print(f"[Edge Client {args.name}] Sending PACKED model to central server.")
@@ -337,8 +385,9 @@ def run_edge_as_client(shared_state):
                 return packed_params, num_examples, {}
             else:
                 # something broke
-                default = [np.array([0.0, 0.0, 0.0, 0.0])]
-                return default, 1, {}
+                return [], 0, {}
+                # default = [np.array([0.0, 0.0, 0.0, 0.0])]
+                # return default, 1, {}
 
         # def evaluate(self, parameters, config):
         #     num_examples = self.shared_state.get("num_examples")
