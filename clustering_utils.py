@@ -440,6 +440,7 @@ def save_distributions_clusters(save_dir, df_pre, df_post, df_cluster, sil_score
             f.write("Metric,Value\n")
             if sil_score is not None:
                 f.write(f"Silhouette Score,{sil_score:.6f}\n")
+        print(f"✅ Saved clustering metrics to {metrics_file}")
     
     os.makedirs(save_dir, exist_ok=True)
     
@@ -451,7 +452,7 @@ def save_distributions_clusters(save_dir, df_pre, df_post, df_cluster, sil_score
     print(f"✅- {os.path.join(save_dir, 'distribution_pre_clustering.csv')}")
     print(f"✅- {os.path.join(save_dir, 'distribution_post_clustering.csv')}")
     print(f"✅- {os.path.join(save_dir, 'cluster_distribution.csv')}")
-    print(f"✅ Saved clustering metrics to {metrics_file}")
+    
 
 def assign_clusters_to_edge_servers(topology_info, cluster_result):
     """
