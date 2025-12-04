@@ -4,7 +4,7 @@
 import yaml
 import numpy as np
 from scipy.stats import wasserstein_distance
-from scipy.spatial.distance import jensenshannon
+from scipy.spatial.distance import jensenshannon, pdist, squareform
 from scipy.cluster.hierarchy import linkage, fcluster, leaves_list
 from collections import defaultdict
 import pandas as pd
@@ -15,6 +15,7 @@ import pprint
 from scipy.spatial.distance import cosine, euclidean, cityblock
 from sklearn.mixture import GaussianMixture
 from sklearn.cluster import KMeans
+from sklearn.metrics import silhouette_score
 
 rand_seed = 42
 np.random.seed(seed=rand_seed)
@@ -279,6 +280,19 @@ def cluster_clients_by_distribution(num_clusters, distance_metric='emd', save_di
             cluster_labels = cluster_labels + 1 # making clusters 1 indexed
             print(f" K-means inertia: {kmeans.inertia_:.4f}")
         
+        elif distance_metric == 'mahalanobis':
+            # Calculate covariance matrix of the distributions
+            # Add small noise (1e-6) to ensure invertibility
+            cov = np.cov(X, rowvar=False) + np.eye(n_classes) * 1e-6
+            try:
+                inv_cov = np.linalg.inv(cov)
+            except np.linalg.LinAlgError:
+                inv_cov = np.linalg.pinv(cov) # Pseudo-inverse fallback
+            
+            # Use scipy's pdist for efficient pairwise calculation
+            condensed = pdist(X, metric='mahalanobis', VI=inv_cov)
+            dist_matrix = squareform(condensed)
+        
         else:
             raise ValueError(f"Unknown distance metric: {distance_metric}")
         
@@ -315,6 +329,24 @@ def cluster_clients_by_distribution(num_clusters, distance_metric='emd', save_di
             partition_mapping[new_pid] = original_pid
             cluster_assignments[new_pid] = cluster_id
             new_pid += 1
+    
+    # --- SILHOUETTE SCORE CALCULATION ---
+    sil_score = None
+    try:
+        unique_labels = len(set(cluster_labels))
+        # Silhouette requires at least 2 clusters and less than N clusters
+        if unique_labels > 1 and unique_labels < n_clients and distance_metric != 'none':
+            if distance_metric in ['gmm', 'kmeans']:
+                # Standard algorithms use Euclidean space implies Euclidean silhouette
+                sil_score = silhouette_score(X, cluster_labels, metric='euclidean')
+            else:
+                # For custom metrics (EMD, JSD, Mahalanobis), use the Precomputed Distance Matrix
+                # Note: dist_matrix must be square form here
+                if dist_matrix.ndim == 1: dist_matrix = squareform(dist_matrix)
+                sil_score = silhouette_score(dist_matrix, cluster_labels, metric='precomputed')
+            print(f"  Silhouette Score: {sil_score:.4f}")
+    except Exception as e:
+        print(f"  ⚠️ Could not calculate Silhouette Score: {e}")
 
     # --- GENERATE REPORTS (Shared logic) ---
     print("  Generating distribution CSVs...")
@@ -386,7 +418,7 @@ def cluster_clients_by_distribution(num_clusters, distance_metric='emd', save_di
     df_cluster = pd.DataFrame(cluster_aggregate_rows)
     
     # Step 7: Save CSVs
-    save_distributions_clusters(save_dir, df_pre, df_post, df_cluster)
+    save_distributions_clusters(save_dir, df_pre, df_post, df_cluster, sil_score)
     
     return {
         'partition_mapping': partition_mapping,
@@ -395,12 +427,19 @@ def cluster_clients_by_distribution(num_clusters, distance_metric='emd', save_di
         'client_distributions_post': df_post,
         'cluster_distributions': df_cluster,
         'distance_matrix': dist_matrix,
-        'linkage_matrix': linkage_matrix
+        'linkage_matrix': linkage_matrix,
+        'silhouette_score': sil_score
     }
 
-def save_distributions_clusters(save_dir, df_pre, df_post, df_cluster):
+def save_distributions_clusters(save_dir, df_pre, df_post, df_cluster, sil_score=None):
     if save_dir is None:
         save_dir = os.path.join('logs', EXPERIMENT_NAME)
+        # Save Metrics to a new file
+        metrics_file = os.path.join(save_dir, 'clustering_metrics.csv')
+        with open(metrics_file, 'w') as f:
+            f.write("Metric,Value\n")
+            if sil_score is not None:
+                f.write(f"Silhouette Score,{sil_score:.6f}\n")
     
     os.makedirs(save_dir, exist_ok=True)
     
@@ -412,7 +451,7 @@ def save_distributions_clusters(save_dir, df_pre, df_post, df_cluster):
     print(f"✅- {os.path.join(save_dir, 'distribution_pre_clustering.csv')}")
     print(f"✅- {os.path.join(save_dir, 'distribution_post_clustering.csv')}")
     print(f"✅- {os.path.join(save_dir, 'cluster_distribution.csv')}")
-
+    print(f"✅ Saved clustering metrics to {metrics_file}")
 
 def assign_clusters_to_edge_servers(topology_info, cluster_result):
     """
