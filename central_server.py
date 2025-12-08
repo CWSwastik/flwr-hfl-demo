@@ -5,11 +5,11 @@ from flwr.server import ServerConfig
 import argparse
 import matplotlib.pyplot as plt
 import numpy as np
-from config import NUM_ROUNDS, MODEL, SEED, GRADIENT_CORRECTION_BETA
+from config import NUM_ROUNDS, MODEL, SEED, GRADIENT_CORRECTION_BETA, FEDMUT_CENTRAL, FEDMUT_ALPHA
 from logger import Logger
 from utils import log_to_dashboard
 
-from utils import set_parameters, test, load_datasets, log_to_dashboard, get_parameters
+from utils import set_parameters, test, load_datasets, log_to_dashboard, get_parameters, generate_mutated_models
 from flwr.common import parameters_to_ndarrays, FitIns, ndarrays_to_parameters, FitRes
 
 parser = argparse.ArgumentParser(description="Start the Flower central server.")
@@ -55,6 +55,9 @@ class FedAvgWithGradientCorrection(fl.server.strategy.FedAvg):
             on_evaluate_config_fn=lambda rnd: {"round": rnd},
             initial_parameters=initial_parameters,
         )
+        self.prev_global_weights = None 
+        if initial_parameters is not None:
+            self.prev_global_weights = parameters_to_ndarrays(initial_parameters)
         self.yi_per_group = {}  # store yi for each group/edge
         # Calculate the split index for weights vs gradients
         model_module = importlib.import_module(f"models.{MODEL}")
@@ -135,6 +138,28 @@ class FedAvgWithGradientCorrection(fl.server.strategy.FedAvg):
             server_round, parameters, client_manager, **kwargs
         )
 
+        if not fit_instructions:
+            return []
+
+        # 2. Prepare for Mutation (if enabled)
+        current_weights = parameters_to_ndarrays(parameters)
+        mutated_weights_list = []
+        use_mutation = False
+
+        # Check config and ensure we have history (prev_weights) to calculate direction
+        if FEDMUT_CENTRAL and self.prev_global_weights is not None and server_round > 1:
+            print(f"[Central Server] 🧬 FedMut: Mutating Global Model for {len(fit_instructions)} Edges.")
+            mutated_weights_list = generate_mutated_models(
+                current_weights, 
+                self.prev_global_weights, 
+                len(fit_instructions), 
+                FEDMUT_ALPHA
+            )
+            use_mutation = True
+        
+        # Update history for next round
+        self.prev_global_weights = current_weights
+
         # fit_instructions is a list of (ClientProxy, FitIns)
         new_fit_instructions = []
 
@@ -143,6 +168,14 @@ class FedAvgWithGradientCorrection(fl.server.strategy.FedAvg):
 
             # Get client_id from config or ClientProxy
             cid = cfg.get("cid", getattr(client, "cid", None))
+
+            # A. FedMut Logic: Assign specific mutated model
+            if use_mutation:
+                # Wrap numpy weights back to Parameters object
+                client_parameters = ndarrays_to_parameters(mutated_weights_list[i])
+            else:
+                # Use standard global model
+                client_parameters = fit_ins.parameters
 
             # Fetch yi from yi_per_group
             yi = self.yi_per_group.get(

@@ -25,8 +25,13 @@ TRAINING_WEIGHT_DECAY = 1e-4
 
 TRAINING_SCHEDULER_STEP_SIZE = 10
 TRAINING_SCHEDULER_GAMMA = 0.1
-TRAINING_STRATEGY = "fedavg"  # options: "fedavg", "fedprox"
+TRAINING_STRATEGY = "fedavg"  # options: "fedavg", "fedprox", "fedmut"
 FedProx_MU = 0.01
+# FedMut Configuration
+# 0 = Off, 1 = On
+FEDMUT_CENTRAL = 0  # Mutate Global Model before sending to Edges
+FEDMUT_EDGE = 1     # Mutate Edge Model before sending to Clients
+FEDMUT_ALPHA = 4.0  # Mutation strength (hyperparameter from paper)
 
 DASHBOARD_SERVER_URL = "https://f772957a48fe.ngrok-free.app"
 ENABLE_DASHBOARD = False
@@ -37,7 +42,15 @@ if PARTITIONER == "dirichlet":
 elif PARTITIONER == "pathological":
     SPLIT=f"{SPLIT}_{NUM_CLASSES_PER_PARTITION}"
 
-SPLIT=f"{SPLIT}-cluster_{CLUSTER_STRATEGY}"
+fedmut_type = ""
+if FEDMUT_CENTRAL and FEDMUT_EDGE:
+    fedmut_type = "_Central&Edge"
+elif FEDMUT_CENTRAL:
+    fedmut_type = "_Central"
+elif FEDMUT_EDGE:
+    fedmut_type = "_Edge"
+
+SPLIT=f"{SPLIT}-cluster_{CLUSTER_STRATEGY}-{TRAINING_STRATEGY}{fedmut_type}"
 
 if GRADIENT_CORRECTION_BETA == 1:
     SPLIT=f"{SPLIT}-gc"

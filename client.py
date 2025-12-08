@@ -115,9 +115,9 @@ class FlowerClient(fl.client.NumPyClient):
 
         # for non-gradient-correction training
         if beta == 0:
-            if TRAINING_STRATEGY == "fedavg":
+            if TRAINING_STRATEGY == "fedavg" or TRAINING_STRATEGY == "fedmut":
                 # 1. Use the simple train() function (No Gradient Accumulation overhead)
-                print("Training with FedAvg...")
+                print(f"Training with {TRAINING_STRATEGY}...")
                 losses, accuracies = train(
                     self.net, self.trainloader, self.optimizer, epochs=local_epochs
                 )

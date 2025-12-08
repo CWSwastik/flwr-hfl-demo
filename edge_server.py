@@ -9,8 +9,8 @@ import numpy as np
 import multiprocessing
 import argparse
 from logger import Logger
-from utils import load_datasets, set_parameters, test, log_to_dashboard, get_parameters
-from config import MODEL, MIN_CLIENTS_PER_EDGE, GRADIENT_CORRECTION_BETA, ENABLE_DASHBOARD, SEED
+from utils import load_datasets, set_parameters, test, log_to_dashboard, get_parameters, generate_mutated_models
+from config import MODEL, MIN_CLIENTS_PER_EDGE, GRADIENT_CORRECTION_BETA, ENABLE_DASHBOARD, SEED, FEDMUT_EDGE, FEDMUT_ALPHA
 import gc
 import pickle
 
@@ -222,6 +222,25 @@ class EdgeStrategy(fl.server.strategy.FedAvg):
         fit_instructions = super().configure_fit(
             server_round, parameters, client_manager, **kwargs
         )
+        if not fit_instructions: return []
+
+        current_weights = parameters_to_ndarrays(parameters)
+        prev_weights = self.shared_state.get("fedmut_history_for_round", None)
+        
+        mutated_weights_list = []
+        use_mutation = False
+
+        if FEDMUT_EDGE and prev_weights is not None:
+            print(f"[Edge Server] 🧬 FedMut: Mutating Model for {len(fit_instructions)} Clients.")
+            mutated_weights_list = generate_mutated_models(
+                current_weights,
+                prev_weights,
+                len(fit_instructions),
+                FEDMUT_ALPHA
+            )
+            use_mutation = True
+        
+
 
         # yi is received from central server, stored in shared_state
         yi_blob = self.shared_state.get("yi", None)
@@ -236,15 +255,18 @@ class EdgeStrategy(fl.server.strategy.FedAvg):
         if zi_blob:
             zi_per_client = pickle.loads(zi_blob)
         
-            
-
         beta = GRADIENT_CORRECTION_BETA
 
         new_fit_instructions = []
 
-        for client, fit_ins in fit_instructions:
+        for i, (client, fit_ins) in enumerate(fit_instructions):
             cid = getattr(client, "cid", None)
 
+            if use_mutation:
+                client_parameters = ndarrays_to_parameters(mutated_weights_list[i])
+            else:
+                client_parameters = fit_ins.parameters
+            
             client_zi = zi_per_client.get(cid, None)
             if client_zi is None and zi_per_client:
                  # Fallback logic
@@ -266,7 +288,7 @@ class EdgeStrategy(fl.server.strategy.FedAvg):
                 "cid": cid,
             })
 
-            new_fit_instructions.append((client, FitIns(fit_ins.parameters, cfg)))
+            new_fit_instructions.append((client, FitIns(client_parameters, cfg)))
             
         del zi_per_client
         del yi
@@ -308,6 +330,11 @@ def run_edge_as_client(shared_state):
 
         def fit(self, parameters, config):
             print(f"[Edge Client {args.name}] Received model from central server.")
+            
+            current_weights = parameters
+            prev_weights = self.shared_state.get("fedmut_prev_weights", None)
+            self.shared_state["fedmut_prev_weights"] = current_weights
+            self.shared_state["fedmut_history_for_round"] = prev_weights
             
             # --- 1. OPTIMIZATION FOR NO-GC (beta=0) ---
             if GRADIENT_CORRECTION_BETA == 0:

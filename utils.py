@@ -238,6 +238,52 @@ def train_fedprox(net, trainloader, optimizer: torch.optim.Adam, epochs: int, ve
 
     return losses, accuracies
 
+def generate_mutated_models(current_weights, old_weights, num_variations, alpha=4.0):
+    """
+    Implements FedMut Algorithm 2 (Balanced Mutation).
+    
+    Ensures that for every layer, the sum of mutation directions across 
+    all 'num_variations' models is exactly 0. This guarantees that 
+    Agg(Mutated_Models) == Global_Model.
+    """
+    # 1. Calculate Gradients (Direction: Current - Old)
+    gradients = [c - o for c, o in zip(current_weights, old_weights)]
+    
+    # 2. Prepare the Balanced Mutation Matrix
+    # If K=4, we want directions [-1, -1, 1, 1]
+    # If K=5, we keep one model original (0), and mutate 4: [-1, -1, 1, 1]
+    
+    num_pairs = num_variations // 2
+    # Create the base list of directions for one layer: [1, 1, ..., -1, -1, ...]
+    base_directions = [1.0] * num_pairs + [-1.0] * num_pairs
+    
+    # If odd, we will handle the extra client separately (keep it as original)
+    
+    mutated_models = [[] for _ in range(num_variations)]
+    
+    # 3. Apply Layer-wise Balanced Mutation
+    for l_idx, (layer_w, layer_g) in enumerate(zip(current_weights, gradients)):
+        
+        # Shuffle directions specifically for this layer
+        # This ensures diversity: Client A might get +1 on Layer 1 and -1 on Layer 2
+        np.random.shuffle(base_directions)
+        
+        # Assign mutated weights to the paired clients
+        for i in range(num_pairs * 2):
+            direction = base_directions[i]
+            
+            # Formula: W_new = W + alpha * direction * Gradient
+            mutation_term = (alpha * direction * layer_g)
+            new_layer = (layer_w + mutation_term)
+            
+            mutated_models[i].append(new_layer)
+            
+        # Handle the odd client out (if any)
+        # The paper says: "set w_K = w_glb when K%2=1"
+        if num_variations % 2 != 0:
+            mutated_models[-1].append(layer_w) # No mutation
+            
+    return mutated_models
 
 def test(net, testloader):
     """Evaluate the network on the entire test set."""
