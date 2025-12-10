@@ -51,7 +51,7 @@ elif FEDMUT_CENTRAL and TRAINING_STRATEGY == "fedmut":
 elif FEDMUT_EDGE and TRAINING_STRATEGY == "fedmut":
     fedmut_type = "_Edge"
 
-SPLIT=f"{SPLIT}-cluster_{CLUSTER_STRATEGY}-{TRAINING_STRATEGY}{fedmut_type}{"-dissimilar_cluster" if DISSIMILAR_CLUSTERING else ""}"
+SPLIT=f"{SPLIT}-cluster_{CLUSTER_STRATEGY}-{TRAINING_STRATEGY}{fedmut_type}{'-dissimilar_cluster' if DISSIMILAR_CLUSTERING else ''}"
 
 if GRADIENT_CORRECTION_BETA == 1:
     SPLIT=f"{SPLIT}-gc"
