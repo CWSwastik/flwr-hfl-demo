@@ -16,7 +16,8 @@ DIRICHLET_ALPHA = 0.1
 NUM_CLASSES_PER_PARTITION = 3  # used in pathological partitioning (limit label)
 NUM_CLASSES = 10  # total number of classes in the dataset
 
-CLUSTER_STRATEGY = "none" # options: "emd", "jsd", "cosine","euclidean", "manhattan", "gmm", "kmeans", "mahalanobis", "none"
+CLUSTER_STRATEGY = "none" # options: "emd", "jsd", "cosine", "euclidean", "manhattan", "gmm", "kmeans", "mahalanobis", "none"
+DISSIMILAR_CLUSTERING = True  # if True, clients in the same cluster are dissimilar
 
 GRADIENT_CORRECTION_BETA = 0
 
@@ -43,14 +44,14 @@ elif PARTITIONER == "pathological":
     SPLIT=f"{SPLIT}_{NUM_CLASSES_PER_PARTITION}"
 
 fedmut_type = ""
-if FEDMUT_CENTRAL and FEDMUT_EDGE:
+if FEDMUT_CENTRAL and FEDMUT_EDGE and TRAINING_STRATEGY == "fedmut":
     fedmut_type = "_Central&Edge"
-elif FEDMUT_CENTRAL:
+elif FEDMUT_CENTRAL and TRAINING_STRATEGY == "fedmut":
     fedmut_type = "_Central"
-elif FEDMUT_EDGE:
+elif FEDMUT_EDGE and TRAINING_STRATEGY == "fedmut":
     fedmut_type = "_Edge"
 
-SPLIT=f"{SPLIT}-cluster_{CLUSTER_STRATEGY}-{TRAINING_STRATEGY}{fedmut_type}"
+SPLIT=f"{SPLIT}-cluster_{CLUSTER_STRATEGY}-{TRAINING_STRATEGY}{fedmut_type}{"-dissimilar_cluster" if DISSIMILAR_CLUSTERING else ""}"
 
 if GRADIENT_CORRECTION_BETA == 1:
     SPLIT=f"{SPLIT}-gc"

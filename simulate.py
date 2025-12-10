@@ -11,7 +11,8 @@ from config import (
     NUM_CLIENTS, 
     CLUSTER_STRATEGY, 
     NUM_CLASSES,
-    MIN_CLIENTS_PER_EDGE
+    MIN_CLIENTS_PER_EDGE,
+    DISSIMILAR_CLUSTERING
 )
 import config
 import random
@@ -20,7 +21,9 @@ import json
 from clustering_utils import (
     parse_topology_for_clustering, 
     cluster_clients_by_distribution,
-    assign_clusters_to_edge_servers
+    assign_clusters_to_edge_servers,
+    assign_dissimilar_clusters_to_edges,
+    calculate_and_save_final_metrics
 )
 from collections import defaultdict
 
@@ -352,16 +355,34 @@ def compute_client_to_edge_mapping(topo_file):
         save_dir=save_dir,
         topology_info=topo_info
     )
-    
+
+    partition_to_edge_target = {}
+
     cluster_assignments = cluster_results['cluster_assignments'] 
     cluster_to_edge = assign_clusters_to_edge_servers(topo_info, cluster_results)
-    partition_to_edge_target = {}
     
-    print("\n🔗 Re-routing Clients based on Data:")
-    for pid, cid in cluster_assignments.items():
-        target_edge = cluster_to_edge.get(cid)
-        if target_edge:
-            partition_to_edge_target[pid] = target_edge
+    if DISSIMILAR_CLUSTERING:
+        print("\n🔀 Mode: DISSIMILAR (Creating Diverse Edge Groups)")
+        # Direct mapping: {pid -> edge_name}
+        partition_to_edge_target = assign_dissimilar_clusters_to_edges(topo_info, cluster_results)
+    else:
+        print("\nBlob Mode: SIMILAR (Keeping Clusters Together)")
+        # Old logic: {cid -> edge_name}
+        cluster_assignments = cluster_results['cluster_assignments'] 
+        cluster_to_edge = assign_clusters_to_edge_servers(topo_info, cluster_results)
+        
+        print("\n🔗 Re-routing Clients based on Data:")
+        for pid, cid in cluster_assignments.items():
+            target_edge = cluster_to_edge.get(cid)
+            if target_edge:
+                partition_to_edge_target[pid] = target_edge
+    
+    calculate_and_save_final_metrics(
+        save_dir, 
+        partition_to_edge_target, 
+        cluster_results, 
+        NUM_CLASSES
+    )
 
     print(f"partition_to_edge_target: {json.dumps(partition_to_edge_target, indent=2)}")
     return partition_to_edge_target

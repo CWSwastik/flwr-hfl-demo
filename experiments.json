@@ -1,33 +1,20 @@
 [
   {
-    "NUM_CLIENTS": 16,
-    "MIN_CLIENTS_PER_EDGE": 8,
+    "TOPOLOGY_FILE": "topo-15c.yml",
+    "NUM_CLIENTS": 15,
+    "MIN_CLIENTS_PER_EDGE": 5,
     "DATASET": "mnist",
     "MODEL": "lenet_mnist",
     "CLUSTER_STRATEGY": "none",
+    "DISSIMILAR_CLUSTERING": false,
     "PARTITIONER" : "iid",
-    "NUM_ROUNDS": 2,
-    "EXPERIMENT_NAME": "test-iid-none"
-  },
-  {
-    "NUM_CLIENTS": 16,
-    "MIN_CLIENTS_PER_EDGE": 8,
-    "DATASET": "mnist",
-    "MODEL": "lenet_mnist",
-    "CLUSTER_STRATEGY": "emd",
-    "PARTITIONER" : "iid",
-    "NUM_ROUNDS": 2,
-    "EXPERIMENT_NAME": "test-iid-emd"
-  },
-  {
-    "NUM_CLIENTS": 16,
-    "MIN_CLIENTS_PER_EDGE": 8,
-    "DATASET": "mnist",
-    "MODEL": "lenet_mnist",
-    "CLUSTER_STRATEGY": "none",
-    "PARTITIONER" : "dirichlet",
-    "NUM_ROUNDS": 2,
-    "EXPERIMENT_NAME": "test-dirchlet-none"
+    "GRADIENT_CORRECTION_BETA": 0,
+    "NUM_ROUNDS": 100,
+    "TRAINING_STRATEGY": "fedmut",
+    "FEDMUT_ALPHA": 4,
+    "FEDMUT_CENTRAL": 0,
+    "FEDMUT_EDGE": 1,
+    "TRAINING_LEARNING_RATE": 0.0005
   }
 ]
 

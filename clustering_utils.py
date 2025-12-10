@@ -3,8 +3,7 @@
 
 import yaml
 import numpy as np
-from scipy.stats import wasserstein_distance
-from scipy.spatial.distance import jensenshannon, pdist, squareform
+from scipy.stats import wasserstein_distance, entropy
 from scipy.cluster.hierarchy import linkage, fcluster, leaves_list
 from collections import defaultdict
 import pandas as pd
@@ -12,7 +11,6 @@ import os
 from config import NUM_CLIENTS, NUM_CLASSES, EXPERIMENT_NAME, TOPOLOGY_FILE
 from utils import load_datasets, get_dataloader_summary
 import pprint
-from scipy.spatial.distance import cosine, euclidean, cityblock
 from sklearn.mixture import GaussianMixture
 from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_score
@@ -484,6 +482,163 @@ def assign_clusters_to_edge_servers(topology_info, cluster_result):
             cluster_to_edge[c_id] = edge_servers[i]
     return cluster_to_edge
 
+def assign_dissimilar_clusters_to_edges(topo_info, cluster_result):
+    """
+    Creates DIVERSE edge groups by mixing clients from different homogeneous clusters.
+    
+    Logic:
+    1. Identify client types (clusters) from the clustering result.
+    2. Distribute clients of each type Round-Robin across available Edge Servers.
+
+    cluster 1 - clients 1,3,5,7,10,11
+    cluster 2 - clients 2,4,6,8
+    cluster 3 - client 9
+
+    would result in:
+    edge 1 -  client 1,7,2,8
+    edge 2 -  client 3,10,4,9
+    edge 3 -  client 5,11,6
+
+    Returns:
+        partition_to_edge (dict): {partition_id: edge_server_name}
+    """
+    edge_servers = topo_info['edge_servers']
+    num_edges = len(edge_servers)
+    cluster_assignments = cluster_result['cluster_assignments']
+    
+    # 1. Group clients by their "Type" (Homogeneous Cluster ID)
+    clients_by_type = defaultdict(list)
+    for pid, cid in cluster_assignments.items():
+        clients_by_type[cid].append(pid)
+        
+    # 2. Sort types by size (largest groups first) to ensure balanced distribution
+    # Sorting ensures that we distribute the most common data profiles evenly first.
+    sorted_types = sorted(clients_by_type.keys(), key=lambda k: len(clients_by_type[k]), reverse=True)
+    
+    partition_to_edge = {}
+    edge_idx = 0
+    
+    # 3. Stratified Distribution (The Mixing Step)
+    for type_id in sorted_types:
+        clients_in_this_type = clients_by_type[type_id]
+        
+        for pid in clients_in_this_type:
+            # Assign current client to current edge
+            target_edge_name = edge_servers[edge_idx]
+            partition_to_edge[pid] = target_edge_name
+            
+            # Move to next edge (Round Robin)
+            edge_idx = (edge_idx + 1) % num_edges
+            
+    print(f"  🔄 Dissimilar Clustering: Distributed {len(partition_to_edge)} clients across {num_edges} edges.")
+    return partition_to_edge
+
+def calculate_and_save_final_metrics(save_dir, edge_assignments, cluster_results, n_classes):
+    """
+    Calculates metrics for the FINAL Edge assignments and saves detailed reports.
+    Now includes full client class distributions in the CSV (like df_post).
+    """
+    # 1. Parse Data
+    dist_matrix = cluster_results['distance_matrix']
+    df_pre = cluster_results['client_distributions_pre']
+    
+    # Map: Edge Name -> List of Client IDs
+    edge_groups = defaultdict(list)
+    for pid, edge_name in edge_assignments.items():
+        edge_groups[edge_name].append(pid)
+    
+    # --- Part A: Calculate Metrics per Edge (Similar to df_cluster) ---
+    metrics = []
+    for edge_name, pids in edge_groups.items():
+        # 1. Intra-Edge Diversity (Avg Pairwise Distance)
+        if len(pids) > 1:
+            group_indices = np.ix_(pids, pids)
+            sub_matrix = dist_matrix[group_indices]
+            unique_distances = sub_matrix[np.triu_indices(len(pids), k=1)]
+            avg_diversity = np.mean(unique_distances)
+        else:
+            avg_diversity = 0.0
+            
+        # 2. Aggregated Balance (KL Divergence)
+        total_counts = np.zeros(n_classes)
+        edge_total_samples = 0
+        
+        for pid in pids:
+            # Extract counts efficiently from df_pre
+            row = df_pre.loc[df_pre['PartitionID'] == pid].iloc[0]
+            counts = [row[f"Class_{k}"] for k in range(n_classes)]
+            total_counts += np.array(counts)
+            edge_total_samples += row['TotalSamples']
+            
+        # Normalize
+        total_sum = np.sum(total_counts)
+        if total_sum > 0:
+            agg_dist = total_counts / total_sum
+        else:
+            agg_dist = np.ones(n_classes) / n_classes
+            
+        uniform = np.ones(n_classes) / n_classes
+        kl_div = entropy(agg_dist, qk=uniform)
+        
+        # Build Metric Row
+        metric_row = {
+            "EdgeServer": edge_name,
+            "NumClients": len(pids),
+            "TotalSamples": int(edge_total_samples),
+            "Avg_Dissimilarity_Score": avg_diversity,
+            "KL_Div_from_Uniform": kl_div,
+        }
+        # Add Aggregated Class Counts to the Metric File too
+        for k in range(n_classes):
+            metric_row[f"Class_{k}"] = int(total_counts[k])
+            
+        metrics.append(metric_row)
+        
+    df_metrics = pd.DataFrame(metrics)
+    
+    # --- Part B: Detailed Client Assignment (Similar to df_post) ---
+    final_rows = []
+    cluster_assignments = cluster_results['cluster_assignments']
+    
+    # We iterate through df_pre to ensure we get every client's details
+    # and just append their new Edge Assignment
+    
+    # Sort by Edge Server for easier reading, or ID
+    sorted_pids = sorted(edge_assignments.keys(), key=lambda x: edge_assignments[x])
+    
+    for pid in sorted_pids:
+        edge_name = edge_assignments[pid]
+        
+        # Get Original Info from df_pre
+        row_pre = df_pre.loc[df_pre['PartitionID'] == pid].iloc[0]
+        
+        # Build the detailed row
+        new_row = {
+            "ClientName": row_pre['ClientName'],
+            "PartitionID": pid,
+            "OriginalCluster": cluster_assignments.get(pid, -1), # The Similarity Type
+            "AssignedEdge": edge_name,
+            "TotalSamples": row_pre['TotalSamples']
+        }
+        
+        # Add all class columns
+        for k in range(n_classes):
+            new_row[f"Class_{k}"] = row_pre[f"Class_{k}"]
+            
+        final_rows.append(new_row)
+    
+    df_final = pd.DataFrame(final_rows)
+    
+    # Save files
+    os.makedirs(save_dir, exist_ok=True)
+    df_final.to_csv(os.path.join(save_dir, "final_edge_assignments.csv"), index=False)
+    df_metrics.to_csv(os.path.join(save_dir, "final_edge_metrics.csv"), index=False)
+    
+    print(f"\n✅ Saved Final Detailed Reports to {save_dir}")
+    print(f"   - final_edge_assignments.csv (Client-level details)")
+    print(f"   - final_edge_metrics.csv (Edge-level aggregated stats)")
+    
+    return df_metrics
 
 # Example usage and integration test
 if __name__ == "__main__":
