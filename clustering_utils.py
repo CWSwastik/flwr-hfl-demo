@@ -5,6 +5,7 @@ import yaml
 import numpy as np
 from scipy.stats import wasserstein_distance, entropy
 from scipy.cluster.hierarchy import linkage, fcluster, leaves_list
+from scipy.spatial.distance import jensenshannon, pdist, squareform, cosine, euclidean, cityblock
 from collections import defaultdict
 import pandas as pd
 import os
