@@ -13,6 +13,7 @@ from utils import (
     train,
     train_with_zi_yi,
     train_fedprox,
+    train_fedprox_with_zi_yi,
     test,
     DEVICE,
     get_dataloader_summary,
@@ -141,11 +142,20 @@ class FlowerClient(fl.client.NumPyClient):
         zi = {k: torch.tensor(v, dtype=torch.float32, device=device) for k, v in zi.items()}
         yi = {k: torch.tensor(v, dtype=torch.float32, device=device) for k, v in yi.items()}
 
-        # --- train with gradient correction ---
-        losses, accuracies, gradients = train_with_zi_yi(
-            self.net, self.trainloader, self.optimizer,
-            epochs=local_epochs, beta=beta, zi=zi, yi=yi
-        )
+        losses, accuracies, gradients = None, None, None
+        if TRAINING_STRATEGY == "fedprox":
+            # --- train with gradient correction ---.
+            print("train Fedprox with gc")
+            losses, accuracies, gradients = train_fedprox_with_zi_yi(
+                self.net, self.trainloader, self.optimizer,
+                epochs=local_epochs, beta=beta, zi=zi, yi=yi
+            )
+        else:
+            # --- train with gradient correction ---
+            losses, accuracies, gradients = train_with_zi_yi(
+                self.net, self.trainloader, self.optimizer,
+                epochs=local_epochs, beta=beta, zi=zi, yi=yi
+            )
 
         # --- logging ---
         train_logger.log({

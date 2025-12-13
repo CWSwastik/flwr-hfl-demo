@@ -198,6 +198,68 @@ def train_with_zi_yi(net, trainloader, optimizer, epochs, beta, zi, yi, verbose=
 
     return losses, accuracies, grad_accumulator
 
+def train_fedprox_with_zi_yi(net, trainloader, optimizer: torch.optim.Adam, epochs: int, beta, zi, yi, verbose=False, mu=0.01):
+    """Train the network on the training set."""
+    net.to(DEVICE)
+    global_params = [p.clone().detach() for p in net.parameters()]
+    criterion = torch.nn.CrossEntropyLoss()
+    net.train()
+    losses = []
+    accuracies = []
+    # accumulator for average gradients
+    grad_accumulator = {name: torch.zeros_like(p, device=DEVICE) 
+                        for name, p in net.named_parameters() if p.requires_grad}
+    
+    num_batches = 0
+    for epoch in range(epochs):
+        correct, total, epoch_loss = 0, 0, 0.0
+        for batch in trainloader:
+            images, labels = batch["img"].to(DEVICE), batch["label"].to(DEVICE)
+            optimizer.zero_grad()
+            outputs = net(images)
+            loss = criterion(outputs, labels)
+            # Fedprox
+            proximal_term = 0.0
+            for local_weights, global_weights in zip(net.parameters(), global_params):
+                proximal_term += (local_weights - global_weights).norm(2)**2
+            
+            loss += (mu / 2) * proximal_term
+
+            loss.backward()
+            # --- apply gradient correction per-parameter ---
+            with torch.no_grad():
+                for name, p in net.named_parameters():
+                    if p.grad is not None:
+                        correction = beta * (zi.get(name, 0.0) + yi.get(name, 0.0))
+                        p.grad += correction
+
+            # --- accumulate gradients ---
+            with torch.no_grad():
+                for name, p in net.named_parameters():
+                    if p.grad is not None:
+                        grad_accumulator[name] += p.grad.clone()
+
+            optimizer.step()
+            num_batches += 1
+            # Metrics
+            epoch_loss += loss
+            total += labels.size(0)
+            correct += (torch.max(outputs.data, 1)[1] == labels).sum().item()
+        epoch_loss /= len(trainloader.dataset)
+        epoch_acc = correct / total
+
+        losses.append(epoch_loss.item())
+        accuracies.append(epoch_acc)
+        if verbose:
+            print(f"Epoch {epoch+1}: train loss {epoch_loss}, accuracy {epoch_acc}")
+    # average gradients
+    for name in grad_accumulator:
+        grad_accumulator[name] /= num_batches
+
+    del global_params
+
+    return losses, accuracies, grad_accumulator
+
 def train_fedprox(net, trainloader, optimizer: torch.optim.Adam, epochs: int, verbose=False, mu=0.01):
     """Train the network on the training set."""
     net.to(DEVICE)

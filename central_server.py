@@ -163,7 +163,7 @@ class FedAvgWithGradientCorrection(fl.server.strategy.FedAvg):
         # fit_instructions is a list of (ClientProxy, FitIns)
         new_fit_instructions = []
 
-        for client, fit_ins in fit_instructions:
+        for i, (client, fit_ins) in enumerate(fit_instructions):
             cfg = fit_ins.config.copy()  # make a copy
 
             # Get client_id from config or ClientProxy
