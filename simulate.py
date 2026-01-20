@@ -244,9 +244,10 @@ def spawn_processes():
         for name, cfg in sorted_topo.items():
             kind = cfg.get("kind")
             if kind == "server":
-                cmd = f'py "{get_abs_path("central_server.py")}" {cfg["host"]}:{cfg["port"]} --exp_id {EXP_ID}'
+                cmd = f'py "{get_abs_path("monitor_process.py")}" --name {name} --kind server -- py "{get_abs_path("central_server.py")}" {cfg["host"]}:{cfg["port"]} --exp_id {EXP_ID}'
             elif kind == "edge":
                 cmd = (
+                    f'py "{get_abs_path("monitor_process.py")}" --name {name} --kind edge -- '
                     f'py "{get_abs_path("edge_server.py")}" --server '
                     f'{cfg["server"]["host"]}:{cfg["server"]["port"]} --client '
                     f'{cfg["client"]["host"]}:{cfg["client"]["port"]} --name {name} --exp_id {EXP_ID}'
@@ -268,6 +269,7 @@ def spawn_processes():
                 # )
                 
                 cmd = (
+                    f'py "{get_abs_path("monitor_process.py")}" --name {name} --kind client -- '
                     f'py "{get_abs_path("client.py")}" '
                     f'{cfg["host"]}:{cfg["port"]} --partition_id {physical_partition_id} ' # Use new ID
                     f"--name {name} --exp_id {EXP_ID}"
@@ -292,7 +294,7 @@ def spawn_processes():
         for name, cfg in sorted_topo.items():
             kind = cfg.get("kind")
             if kind == "server":
-                cmd = f'python "{get_abs_path("central_server.py")}" {cfg["host"]}:{cfg["port"]} --exp_id {EXP_ID}'
+                cmd = f'python "{get_abs_path("monitor_process.py")}" --name {name} --kind server -- python "{get_abs_path("central_server.py")}" {cfg["host"]}:{cfg["port"]} --exp_id {EXP_ID}'
             elif kind == "edge":
                 cmd = (
                     f'python "{get_abs_path("edge_server.py")}" --server '
@@ -313,6 +315,7 @@ def spawn_processes():
                 print(f"Mapping client {name} (Logical ID {logical_id}) -> Physical Partition ID {physical_partition_id}")
 
                 cmd = (
+                    f'python "{get_abs_path("monitor_process.py")}" --name {name} --kind client -- '
                     f'python "{get_abs_path("client.py")}" '
                     f'{cfg["host"]}:{cfg["port"]} --partition_id {physical_partition_id} ' # Use new ID
                     f" --name {name} --exp_id {EXP_ID}"
@@ -569,13 +572,14 @@ def spawn_processes():
         for name, cfg in sorted_topo.items():
             kind = cfg.get("kind")
             if kind == "server":
-                cmd = f'py "{get_abs_path("central_server.py")}" {cfg["host"]}:{cfg["port"]} --exp_id {EXP_ID} --min_edges {min_edges}'
+                cmd = f'py "{get_abs_path("monitor_process.py")}" --name {name} --kind server -- py "{get_abs_path("central_server.py")}" {cfg["host"]}:{cfg["port"]} --exp_id {EXP_ID} --min_edges {min_edges}'
             elif kind == "edge":
                 # STRICT COUNT: defaults to 0 if not in list, preventing hangs on unused edges
                 required_clients = edge_client_counts.get(name, 0)
                 if required_clients == 0:
                     print(f"⚠️ Edge server {name} has 0 assigned clients. It is not invoked to prevent hangs.")
                 cmd = (
+                    f'py "{get_abs_path("monitor_process.py")}" --name {name} --kind edge -- '
                     f'py "{get_abs_path("edge_server.py")}" --server '
                     f'{cfg["server"]["host"]}:{cfg["server"]["port"]} --client '
                     f'{cfg["client"]["host"]}:{cfg["client"]["port"]} --name {name} --exp_id {EXP_ID} '
@@ -583,6 +587,7 @@ def spawn_processes():
                 )
             elif kind == "client":
                 cmd = (
+                    f'py "{get_abs_path("monitor_process.py")}" --name {name} --kind client -- '
                     f'py "{get_abs_path("client.py")}" '
                     f'{cfg["host"]}:{cfg["port"]} --partition_id {cfg["partition_id"]} '
                     f"--name {name} --exp_id {EXP_ID}"
@@ -601,13 +606,14 @@ def spawn_processes():
         for name, cfg in sorted_topo.items():
             kind = cfg.get("kind")
             if kind == "server":
-                cmd = f'python "{get_abs_path("central_server.py")}" {cfg["host"]}:{cfg["port"]} --exp_id {EXP_ID} --min_edges {min_edges}'
+                cmd = f'python "{get_abs_path("monitor_process.py")}" --name {name} --kind server -- python "{get_abs_path("central_server.py")}" {cfg["host"]}:{cfg["port"]} --exp_id {EXP_ID} --min_edges {min_edges}'
             elif kind == "edge":
                 required_clients = edge_client_counts.get(name, 0)
                 if required_clients == 0:
                     print(f"⚠️ Edge server {name} has 0 assigned clients. It is not invoked to prevent hangs.")
                 else:
                     cmd = (
+                        f'python "{get_abs_path("monitor_process.py")}" --name {name} --kind edge -- '
                         f'python "{get_abs_path("edge_server.py")}" --server '
                         f'{cfg["server"]["host"]}:{cfg["server"]["port"]} '
                         f'--client {cfg["client"]["host"]}:{cfg["client"]["port"]} --name {name} --exp_id {EXP_ID} '
@@ -615,6 +621,7 @@ def spawn_processes():
                     )
             elif kind == "client":
                 cmd = (
+                    f'python "{get_abs_path("monitor_process.py")}" --name {name} --kind client -- '
                     f'python "{get_abs_path("client.py")}" '
                     f'{cfg["host"]}:{cfg["port"]} --partition_id {cfg["partition_id"]} '
                     f" --name {name} --exp_id {EXP_ID}"
