@@ -4,6 +4,17 @@ import torch
 import torch.nn as nn
 from torchvision.models import resnet18
 
+def replace_bn_with_gn(module, num_groups=32):
+    """
+    Recursively replace BatchNorm2d with GroupNorm.
+    """
+    for name, child in module.named_children():
+        if isinstance(child, nn.BatchNorm2d):
+            # Create a GroupNorm layer with the same number of channels
+            gn = nn.GroupNorm(num_groups, child.num_features)
+            setattr(module, name, gn)
+        else:
+            replace_bn_with_gn(child, num_groups)
 
 class Net(nn.Module):
     def __init__(self):
@@ -23,6 +34,9 @@ class Net(nn.Module):
         # Replace the classifier
         in_features = self.model.fc.in_features
         self.model.fc = nn.Linear(in_features, args['num_classes'])
+
+        # CRITICAL: Replace BN with GroupNorm for HFL stability
+        replace_bn_with_gn(self.model, num_groups=32)
 
     def forward(self, x):
         x = self.model.conv1(x)
