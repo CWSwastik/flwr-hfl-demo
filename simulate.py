@@ -26,7 +26,8 @@ from clustering_utils import (
     calculate_and_save_final_metrics
 )
 from collections import defaultdict
-
+import torch
+import psutil  # <--- Added for RAM monitoring
 
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 EXP_ID = f"experiment_{random.randint(1000, 9999)}"
@@ -47,6 +48,63 @@ def get_free_port():
         return s.getsockname()[1]
 
 
+def print_system_resources():
+    """Prints available CPU, GPU, and RAM resources."""
+    print("\n" + "="*60)
+    print("🖥️  SYSTEM RESOURCES CHECK")
+    print("="*60)
+
+    # 1. GPU Info
+    try:
+        gpu_count = torch.cuda.device_count()
+        print(f"GPUs available: {gpu_count}")
+        if gpu_count > 0:
+            for i in range(gpu_count):
+                gpu_name = torch.cuda.get_device_name(i)
+                # Check memory of each GPU
+                try:
+                    mem_info = torch.cuda.mem_get_info(i)
+                    free_mem = mem_info[0] / (1024**3)
+                    total_mem = mem_info[1] / (1024**3)
+                    print(f"  [{i}] {gpu_name} | Mem: {free_mem:.2f}/{total_mem:.2f} GB Free")
+                except:
+                    print(f"  [{i}] {gpu_name}")
+        else:
+            print("  No GPUs detected. Training will run on CPU.")
+    except Exception as e:
+        print(f"  ⚠️ GPU Check Error: {e}")
+
+    # 2. CPU Info
+    try:
+        total_cpus = os.cpu_count()
+        pytorch_threads = torch.get_num_threads()
+        print(f"\nCPUs:")
+        print(f"  Total Logical Cores: {total_cpus}")
+        print(f"  PyTorch Threads:     {pytorch_threads}")
+    except Exception as e:
+        print(f"  ⚠️ CPU Check Error: {e}")
+
+    # 3. RAM Info
+    try:
+        mem = psutil.virtual_memory()
+        total_ram = mem.total / (1024 ** 3)
+        available_ram = mem.available / (1024 ** 3)
+        percent_used = mem.percent
+        
+        print(f"\nSystem RAM:")
+        print(f"  Total:     {total_ram:.2f} GB")
+        print(f"  Available: {available_ram:.2f} GB")
+        print(f"  Used:      {percent_used}%")
+        
+        if available_ram < 2.0:
+            print("\n  ⚠️ WARNING: Low System RAM available (<2GB). Experiments might crash.")
+            
+    except Exception as e:
+        print(f"  ⚠️ RAM Check Error (install psutil?): {e}")
+
+    print("="*60 + "\n")
+
+
 def create_experiment_on_dashboard(topology):
     if not config.ENABLE_DASHBOARD: return
     url = f"{config.DASHBOARD_SERVER_URL}/experiment/{EXP_ID}/create"
@@ -65,284 +123,6 @@ def create_experiment_on_dashboard(topology):
     url = f"{config.DASHBOARD_SERVER_URL}/experiment/{EXP_ID}/topology"
     post_to_dashboard(url, topology)
 
-'''
-def compute_cluster_aware_partition_map(topo_file):
-    """
-    1. Parses topology to find Edges and Clients.
-    2. Clusters data partitions into K clusters (K = num_edges).
-    3. Maps Cluster_i partitions -> Clients of Edge_i.
-    """
-    print(f"--- Starting Cluster-Aware Partition Mapping ({CLUSTER_STRATEGY}) ---")
-    
-    # 1. Parse Topology
-    topo_info = parse_topology_for_clustering(topo_file)
-    num_edges = topo_info['num_edge_servers']
-    edge_server_names = sorted(topo_info['edge_servers']) # Sort for deterministic assignment
-    edge_to_clients = topo_info['edge_to_clients']
-
-    if num_edges == 0:
-        print("No edge servers found. Returning 1-to-1 mapping.")
-        return {i: i for i in range(NUM_CLIENTS)}
-
-    # 2. Run Clustering (uses clustering_utils)
-    # This saves the CSVs and gives us the cluster assignments for partitions
-    save_dir = os.path.join(BASE_DIR, "logs", config.EXPERIMENT_NAME)
-    
-    cluster_results = cluster_clients_by_distribution(
-        num_clusters=num_edges,
-        distance_metric=CLUSTER_STRATEGY, # 'emd', 'jsd', or 'none'
-        save_dir=save_dir,
-        topology_info=topo_info
-    )
-    
-    # partition_cluster_map: {PartitionID: ClusterID}
-    partition_cluster_map = cluster_results['cluster_assignments'] 
-    
-    # 3. Group Partitions by ClusterID
-    # cluster_partitions[1] = [pid1, pid5, ...]
-    cluster_partitions = defaultdict(list)
-    for pid, cid in partition_cluster_map.items():
-        cluster_partitions[cid].append(pid)
-
-    # 4. Map Clusters to Edges
-    # We have clusters 1..K and Edges E1..EK
-    # We map Cluster 1 -> Edge 1, Cluster 2 -> Edge 2, etc.
-    cluster_ids = sorted(cluster_partitions.keys()) 
-    
-    final_client_partition_map = {}
-
-    print("\n🔗 Mapping Data Clusters to Edge Servers:")
-    
-    for i, edge_name in enumerate(edge_server_names):
-        if i >= len(cluster_ids): 
-            print(f"⚠️ Warning: More edges than clusters. Edge {edge_name} gets no special mapping.")
-            break
-        
-        cluster_id = cluster_ids[i]
-        partitions_in_cluster = cluster_partitions[cluster_id]
-        clients_on_edge = edge_to_clients[edge_name] # List of client names
-        
-        print(f"  Edge '{edge_name}' <==> Cluster {cluster_id} (Partitions: {partitions_in_cluster})")
-        
-        # Assign partitions to clients
-        # We iterate through the clients attached to this edge and give them 
-        # the partitions that belong to this cluster.
-        for j, client_name in enumerate(clients_on_edge):
-            if j < len(partitions_in_cluster):
-                # Get the logical ID defined in topology for this client name
-                client_info = topo_info['client_info'].get(client_name)
-                if client_info:
-                    logical_pid = client_info['partition_id']
-                    if logical_pid is not None:
-                        physical_pid = partitions_in_cluster[j]
-                        final_client_partition_map[int(logical_pid)] = int(physical_pid)
-            else:
-                 print(f"    ⚠️ Not enough partitions in Cluster {cluster_id} for all clients on {edge_name}")
-
-    # Fill in any missing clients with 1-to-1 to avoid crash
-    for i in range(NUM_CLIENTS):
-        if i not in final_client_partition_map:
-            final_client_partition_map[i] = i
-
-    print(f"Final Mapping: {json.dumps(final_client_partition_map, indent=2)}")
-    return final_client_partition_map
-'''
-'''
-def spawn_processes():
-    topo_file = get_abs_path(f"topologies/{TOPOLOGY_FILE}")
-
-    if not os.path.exists(topo_file):
-        print(f"❌ Error: topo.yml not found at {topo_file}")
-        return
-
-    with open(topo_file, "r") as file:
-        topology = yaml.safe_load(file)
-
-    try:
-        if CLUSTER_STRATEGY != "none":
-            partition_map = compute_cluster_aware_partition_map(topo_file)
-        else:
-            print("Cluster strategy is 'none'. Using 1-to-1 mapping.")
-            partition_map = {i: i for i in range(NUM_CLIENTS)}
-            # Still save distributions for reference
-            save_dir = os.path.join(BASE_DIR, "logs", config.EXPERIMENT_NAME)
-            topo_info = parse_topology_for_clustering(topo_file)
-            # Dummy clustering call just to generate CSVs with k=1
-            cluster_clients_by_distribution(NUM_CLIENTS, 'none', save_dir, topo_info)
-
-    except Exception as e:
-        print(f"❌ Error during clustering: {e}")
-        import traceback
-        traceback.print_exc()
-        partition_map = {i: i for i in range(NUM_CLIENTS)}
-    
-    current_os = platform.system()
-
-    create_experiment_on_dashboard(topology)
-
-    # Resolve missing ports and host references
-    # 1. Assign default port to coordinator/server if not specified
-    for name, cfg in topology.items():
-        if cfg.get("kind") == "server":
-            if not cfg.get("port"):
-                auto_port = get_free_port()
-                print(f"Assigning free port {auto_port} to server {name}")
-                cfg["port"] = auto_port
-
-    # 2. Resolve edge configurations
-    for name, cfg in topology.items():
-        if cfg.get("kind") == "edge":
-            # Server side
-            svr = cfg.get("server", {})
-            ref = svr.get("host")
-            if ref in topology:
-                target = topology[ref]
-                svr_host = target.get("host")
-                svr_port = target.get("port")
-            else:
-                svr_host = ref
-                svr_port = svr.get("port") or get_free_port()
-            cfg["server"]["host"] = svr_host
-            cfg["server"]["port"] = svr_port
-            print(f"Edge {name} server -> {svr_host}:{svr_port}")
-
-            # Client side
-            cli = cfg.get("client", {})
-            cli_host = cli.get("host")
-            cli_port = cli.get("port") or get_free_port()
-            cfg["client"]["host"] = cli_host
-            cfg["client"]["port"] = cli_port
-            print(f"Edge {name} client -> {cli_host}:{cli_port}")
-
-    # 3. Resolve client configurations
-    for name, cfg in topology.items():
-        if cfg.get("kind") == "client":
-            ref = cfg.get("host")
-            if ref in topology and topology[ref].get("kind") == "edge":
-                edge_cli = topology[ref]["client"]
-                cfg["host"] = edge_cli.get("host")
-                cfg["port"] = edge_cli.get("port")
-            elif ref in topology and topology[ref].get("kind") == "server":
-                server = topology[ref]
-                cfg["host"] = server.get("host")
-                cfg["port"] = server.get("port")
-            else:
-                # direct host, ensure port exists
-                if not cfg.get("port"):
-                    raise ValueError(f"Port not specified for client {name}")
-            print(f"Client {name} -> {cfg['host']}:{cfg['port']}")
-
-    # Sort by kind order
-    order = {"server": 0, "edge": 1, "client": 2}
-    sorted_topo = dict(
-        sorted(topology.items(), key=lambda item: order.get(item[1].get("kind"), 99))
-    )
-
-    # Spawn processes per OS
-    if current_os == "Windows":
-        commands = []
-        for name, cfg in sorted_topo.items():
-            kind = cfg.get("kind")
-            if kind == "server":
-                cmd = f'py "{get_abs_path("monitor_process.py")}" --name {name} --kind server -- py "{get_abs_path("central_server.py")}" {cfg["host"]}:{cfg["port"]} --exp_id {EXP_ID}'
-            elif kind == "edge":
-                cmd = (
-                    f'py "{get_abs_path("monitor_process.py")}" --name {name} --kind edge -- '
-                    f'py "{get_abs_path("edge_server.py")}" --server '
-                    f'{cfg["server"]["host"]}:{cfg["server"]["port"]} --client '
-                    f'{cfg["client"]["host"]}:{cfg["client"]["port"]} --name {name} --exp_id {EXP_ID}'
-                )
-            elif kind == "client":
-                # Map datasets to clients based on clustering
-                # 'cfg["partition_id"]' is the logical ID (0-15) from the YAML
-                logical_id = cfg["partition_id"]
-                # Look up the *actual* partition ID from our precomputed map
-                physical_partition_id = partition_map.get(logical_id, logical_id) # Fallback
-                
-                print(f"Mapping client {name} (Logical ID {logical_id}) -> Physical Partition ID {physical_partition_id}")
-                
-                # old one reads partition based on ID in topology yaml file
-                # cmd = (
-                #     f'py "{get_abs_path("client.py")}" '
-                #     f'{cfg["host"]}:{cfg["port"]} --partition_id {cfg["partition_id"]} '
-                #     f"--name {name} --exp_id {EXP_ID}"
-                # )
-                
-                cmd = (
-                    f'py "{get_abs_path("monitor_process.py")}" --name {name} --kind client -- '
-                    f'py "{get_abs_path("client.py")}" '
-                    f'{cfg["host"]}:{cfg["port"]} --partition_id {physical_partition_id} ' # Use new ID
-                    f"--name {name} --exp_id {EXP_ID}"
-                )
-
-            else:
-                continue
-
-            commands.append(
-                f'new-tab --title "{name}" -p "Command Prompt" cmd /k {cmd}'
-            )
-
-        if not shutil.which("wt"):
-            print("❌ Error: Windows Terminal (wt) is not installed or not in PATH.")
-            return
-
-        full_command = f'wt {" ; ".join(commands)}'
-        subprocess.run(full_command, shell=True)
-
-    elif current_os == "Linux":
-        procs = []
-        for name, cfg in sorted_topo.items():
-            kind = cfg.get("kind")
-            if kind == "server":
-                cmd = f'python "{get_abs_path("monitor_process.py")}" --name {name} --kind server -- python "{get_abs_path("central_server.py")}" {cfg["host"]}:{cfg["port"]} --exp_id {EXP_ID}'
-            elif kind == "edge":
-                cmd = (
-                    f'python "{get_abs_path("edge_server.py")}" --server '
-                    f'{cfg["server"]["host"]}:{cfg["server"]["port"]} '
-                    f'--client {cfg["client"]["host"]}:{cfg["client"]["port"]} --name {name} --exp_id {EXP_ID}'
-                )
-            elif kind == "client":
-                # old one reads partition based on ID in topology yaml file
-                # cmd = (
-                #     f'python3 "{get_abs_path("client.py")}" '
-                #     f'{cfg["host"]}:{cfg["port"]} --partition_id {cfg["partition_id"]}'
-                #     f" --name {name} --exp_id {EXP_ID}"
-                # )
-                # Map datasets to clients based on clustering
-                logical_id = cfg["partition_id"]
-                physical_partition_id = partition_map.get(logical_id, logical_id) # Fallback
-                
-                print(f"Mapping client {name} (Logical ID {logical_id}) -> Physical Partition ID {physical_partition_id}")
-
-                cmd = (
-                    f'python "{get_abs_path("monitor_process.py")}" --name {name} --kind client -- '
-                    f'python "{get_abs_path("client.py")}" '
-                    f'{cfg["host"]}:{cfg["port"]} --partition_id {physical_partition_id} ' # Use new ID
-                    f" --name {name} --exp_id {EXP_ID}"
-                )
-            else:
-                continue
-
-            proc = subprocess.Popen(cmd, shell=True)
-            procs.append((name, proc))
-            print(f"Starting process {name} with command: {cmd}")
-            if kind == "server":
-                # give server time to initialize
-                time.sleep(30)
-
-        while procs:
-            for name, p in procs[:]:
-                if p.poll() is not None:
-                    print(f"❌ Process {name} has ended")
-                    procs.remove((name, p))
-
-            if len(procs) == 0:
-                break
-            time.sleep(5)
-
-    else:
-        print(f"❌ Unsupported OS: {current_os}")
-'''
 
 def compute_client_to_edge_mapping(topo_file):
     print(f"--- Starting Topology Analysis ({CLUSTER_STRATEGY}) ---")
@@ -410,13 +190,11 @@ def print_topology_summary(edge_client_counts, client_assignments, edge_configs,
 
     # 2. Client Distribution Summary (Brief)
     print("\n📊 Client Assignments:")
-    # Group clients by edge for display
     edge_groups = defaultdict(list)
     for client, details in client_assignments.items():
         edge_groups[details['target_edge']].append(f"{client}(P{details['pid']})")
     
     for edge, clients in edge_groups.items():
-        # chunk clients for display
         client_str = ", ".join(clients)
         if len(client_str) > 80: client_str = client_str[:77] + "..."
         print(f"  📌 {edge}: {client_str}")
@@ -424,6 +202,9 @@ def print_topology_summary(edge_client_counts, client_assignments, edge_configs,
     print("="*80 + "\n")
 
 def spawn_processes():
+    # --- STEP 0: CHECK RESOURCES ---
+    print_system_resources()
+
     topo_file = get_abs_path(f"topologies/{TOPOLOGY_FILE}")
     if not os.path.exists(topo_file):
         print(f"❌ Error: topo.yml not found at {topo_file}")
@@ -435,7 +216,6 @@ def spawn_processes():
     # --- STEP 1: RESOLVE PORTS ---
     edge_configs = {} 
     
-    # Resolve Central Server
     for name, cfg in topology.items():
         if cfg.get("kind") == "server":
             if not cfg.get("port"):
@@ -443,10 +223,8 @@ def spawn_processes():
                 print(f"Assigning free port {auto_port} to server {name}")
                 cfg["port"] = auto_port
 
-    # Resolve Edges
     for name, cfg in topology.items():
         if cfg.get("kind") == "edge":
-            # Upstream
             svr = cfg.get("server", {})
             ref = svr.get("host")
             if ref in topology:
@@ -460,7 +238,6 @@ def spawn_processes():
             cfg["server"]["port"] = svr_port
             print(f"Edge {name} server -> {svr_host}:{svr_port}")
 
-            # Client side
             cli = cfg.get("client", {})
             cli_host = cli.get("host")
             cli_port = cli.get("port") or get_free_port()
@@ -469,7 +246,6 @@ def spawn_processes():
             print(f"Edge {name} client -> {cli_host}:{cli_port}")
             
             edge_configs[name] = {"host": cfg["client"]["host"], "port": cfg["client"]["port"]}
-            print(f"Recorded Edge Config: {name} -> {edge_configs[name]}")
 
     # --- STEP 1.5: PRINT INITIAL TOPOLOGY ---
     initial_edge_counts = {edge: 0 for edge in edge_configs}
@@ -479,19 +255,14 @@ def spawn_processes():
         if cfg.get("kind") == "client":
             logical_pid = cfg.get("partition_id")
             final_edge = "Unknown"
-            
-            # Static Lookup by Host:Port or Name Ref
             ref = cfg.get("host")
             
-            # Direct Name Ref
             if ref in topology and topology[ref].get("kind") == "edge":
                 final_edge = ref
-                # Sync port if it was a reference
                 edge_cli = topology[ref]["client"]
                 cfg["host"] = edge_cli.get("host")
                 cfg["port"] = edge_cli.get("port")
             
-            # Host:Port match
             if final_edge == "Unknown":
                 c_host = cfg.get("host")
                 c_port = cfg.get("port")
@@ -517,8 +288,8 @@ def spawn_processes():
         partition_to_edge_target = {}
 
     # --- STEP 3: UPDATE TOPOLOGY & COUNT ---
-    edge_client_counts = {edge: 0 for edge in edge_configs} # Initialize all edges to 0
-    client_assignments = {} # For display purposes
+    edge_client_counts = {edge: 0 for edge in edge_configs}
+    client_assignments = {}
 
     for name, cfg in topology.items():
         if cfg.get("kind") == "client":
@@ -555,11 +326,20 @@ def spawn_processes():
 
     min_edges = sum(1 for count in edge_client_counts.values() if count > 0)
     
-    # Wait for user validation (optional)
     print("🚀 Spawning processes in 3 seconds...")
     time.sleep(3)
 
-    # --- STEP 5: SPAWN ---
+    # --- STEP 5: GPU BALANCING SETUP ---
+    try:
+        num_gpus = torch.cuda.device_count()
+        print(f"🎮 Detected {num_gpus} GPUs available for load balancing.")
+    except:
+        num_gpus = 0
+        print("⚠️  No GPUs detected. Running on CPU.")
+
+    gpu_iterator = 0  # Round-robin counter
+
+    # --- STEP 6: SPAWN ---
     current_os = platform.system()
     if config.ENABLE_DASHBOARD:
         create_experiment_on_dashboard(topology)
@@ -571,19 +351,29 @@ def spawn_processes():
         commands = []
         for name, cfg in sorted_topo.items():
             kind = cfg.get("kind")
+            
+            # --- GPU ASSIGNMENT (Windows) ---
+            gpu_cmd_prefix = ""
+            if num_gpus > 0:
+                gpu_id = gpu_iterator % num_gpus
+                gpu_iterator += 1
+                gpu_cmd_prefix = f"set CUDA_VISIBLE_DEVICES={gpu_id} && "
+
+            cmd = ""
             if kind == "server":
                 cmd = f'py "{get_abs_path("monitor_process.py")}" --name {name} --kind server -- py "{get_abs_path("central_server.py")}" {cfg["host"]}:{cfg["port"]} --exp_id {EXP_ID} --min_edges {min_edges}'
             elif kind == "edge":
                 # STRICT COUNT: defaults to 0 if not in list, preventing hangs on unused edges
                 required_clients = edge_client_counts.get(name, 0)
                 if required_clients == 0:
-                    print(f"⚠️ Edge server {name} has 0 assigned clients. It is not invoked to prevent hangs.")
+                    print(f"⚠️ Edge server {name} skipped (0 clients).")
+                    continue
                 cmd = (
                     f'py "{get_abs_path("monitor_process.py")}" --name {name} --kind edge -- '
                     f'py "{get_abs_path("edge_server.py")}" --server '
                     f'{cfg["server"]["host"]}:{cfg["server"]["port"]} --client '
                     f'{cfg["client"]["host"]}:{cfg["client"]["port"]} --name {name} --exp_id {EXP_ID} '
-                    f'--min_clients {required_clients}' # Pass EXACT calculated count
+                    f'--min_clients {required_clients}'
                 )
             elif kind == "client":
                 cmd = (
@@ -594,31 +384,42 @@ def spawn_processes():
                 )
             else:
                 continue
-            commands.append(f'new-tab --title "{name}" -p "Command Prompt" cmd /k {cmd}')
+            
+            full_cmd = f"{gpu_cmd_prefix}{cmd}"
+            commands.append(f'new-tab --title "{name}" -p "Command Prompt" cmd /k {full_cmd}')
         
         if shutil.which("wt"):
             subprocess.run(f'wt {" ; ".join(commands)}', shell=True)
         else:
-            print("Windows Terminal (wt) not found. Processes not started.")
+            print("Windows Terminal (wt) not found.")
 
     elif current_os == "Linux":
         procs = []
         for name, cfg in sorted_topo.items():
             kind = cfg.get("kind")
+            
+            # --- GPU ASSIGNMENT (Linux) ---
+            process_env = os.environ.copy()
+            if num_gpus > 0:
+                gpu_id = gpu_iterator % num_gpus
+                gpu_iterator += 1
+                process_env["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
+
+            cmd = ""
             if kind == "server":
                 cmd = f'python "{get_abs_path("monitor_process.py")}" --name {name} --kind server -- python "{get_abs_path("central_server.py")}" {cfg["host"]}:{cfg["port"]} --exp_id {EXP_ID} --min_edges {min_edges}'
             elif kind == "edge":
                 required_clients = edge_client_counts.get(name, 0)
                 if required_clients == 0:
-                    print(f"⚠️ Edge server {name} has 0 assigned clients. It is not invoked to prevent hangs.")
-                else:
-                    cmd = (
-                        f'python "{get_abs_path("monitor_process.py")}" --name {name} --kind edge -- '
-                        f'python "{get_abs_path("edge_server.py")}" --server '
-                        f'{cfg["server"]["host"]}:{cfg["server"]["port"]} '
-                        f'--client {cfg["client"]["host"]}:{cfg["client"]["port"]} --name {name} --exp_id {EXP_ID} '
-                        f'--min_clients {required_clients}'
-                    )
+                    print(f"⚠️ Edge server {name} skipped (0 clients).")
+                    continue
+                cmd = (
+                    f'python "{get_abs_path("monitor_process.py")}" --name {name} --kind edge -- '
+                    f'python "{get_abs_path("edge_server.py")}" --server '
+                    f'{cfg["server"]["host"]}:{cfg["server"]["port"]} '
+                    f'--client {cfg["client"]["host"]}:{cfg["client"]["port"]} --name {name} --exp_id {EXP_ID} '
+                    f'--min_clients {required_clients}'
+                )
             elif kind == "client":
                 cmd = (
                     f'python "{get_abs_path("monitor_process.py")}" --name {name} --kind client -- '
@@ -629,7 +430,7 @@ def spawn_processes():
             else:
                 continue
 
-            proc = subprocess.Popen(cmd, shell=True)
+            proc = subprocess.Popen(cmd, shell=True, env=process_env)
             procs.append((name, proc))
             print(f"Starting process {name} with command: {cmd}")
             if kind == "server":
