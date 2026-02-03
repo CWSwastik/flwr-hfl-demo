@@ -1,3 +1,9 @@
+import os
+# Must be set before importing numpy/torch
+#os.environ["OMP_NUM_THREADS"] = "1"
+#os.environ["OPENBLAS_NUM_THREADS"] = "1"
+#os.environ["MKL_NUM_THREADS"] = "1"
+
 import json
 import flwr as fl
 import numpy as np
@@ -5,8 +11,15 @@ import time
 import argparse
 import requests
 import torch
+import traceback
+import sys
 
+import config
+import pickle
 from utils import (
+    decompress_model_update,
+    gem_train_with_zi_yi,
+    get_fisher_importance,
     load_datasets,
     get_parameters,
     set_parameters,
@@ -19,6 +32,12 @@ from utils import (
     get_dataloader_summary,
     post_to_dashboard,
     log_to_dashboard,
+    compress_model_update,
+    get_payload_size,
+    unpack_compressed_data,
+    pack_compressed_data,
+    get_traffic_metrics, 
+    get_gradient_shap_importance,
 )
 from config import (
     NUM_ROUNDS,
@@ -34,13 +53,12 @@ from config import (
     ENABLE_DASHBOARD,
     EXPERIMENT_NAME,
     LOCAL_EPOCHS,
-    SEED
+    SEED,
+    COMPRESSION_METHOD, 
 )
 
 import importlib
 from logger import Logger
-import os
-import sys, traceback
 
 
 from torch.optim import Adam
@@ -96,87 +114,169 @@ class FlowerClient(fl.client.NumPyClient):
             step_size=TRAINING_SCHEDULER_STEP_SIZE,
             gamma=TRAINING_SCHEDULER_GAMMA,
         )
+        self.traffic_logger = Logger(
+            subfolder="clients",
+            file_path=f"{args.name}_traffic.csv",
+            headers=[
+                "Round", "Direction", 
+                "model_wts_MB", "compressed_model_wts_MB",
+                "Y_i_MB", "compressed_Y_i_MB", 
+                "Z_i_MB", "compressed_Z_i_MB", 
+                "Total_MB", "Compressed_Total_MB",
+                "compression_time_s", "decompression_time_s"
+            ]
+        )
 
     def get_parameters(self, config):
         return get_parameters(self.net)
 
     def fit(self, parameters, config):
+        try:
+            compression_method = config.get("compression_method", COMPRESSION_METHOD)
 
-        if not np.all(parameters[0] == 0):
-            print(f"Received new global model from server")
-            set_parameters(self.net, parameters)
-        else:
-            print("Received initial model from server, starting training...")
+            if not np.all(parameters[0] == 0):
+                set_parameters(self.net, parameters)
+            else:
+                print("Received initial model from server, starting training...")
 
-        # --- load correction terms from config ---
-        zi = json.loads(config.get("zi", "{}"))
-        yi = json.loads(config.get("yi", "{}"))
-        beta = config.get("beta", GRADIENT_CORRECTION_BETA)
-        local_epochs = config.get("local_epochs", LOCAL_EPOCHS)
+            yi_blob = config.get("yi", b"")
+            zi_blob = config.get("zi", b"")
+            
+            # --- FIX: Robust Decoding ---
+            def decode_cv(blob):
+                if not blob: return {}
+                try:
+                    # 1. Unpack bytes/array -> dictionary
+                    data = unpack_compressed_data(blob)
+                    
+                    # 2. Smart Decompression
+                    # decompress_model_update in utils.py automatically checks 
+                    # if the dict has "method" and "layers". If so, it decompresses.
+                    # If not, it returns the data as-is (uncompressed).
+                    return decompress_model_update(data)
+                except Exception as e:
+                    print(f"Error decoding CV blob: {e}")
+                    # Fallback
+                    try:
+                        return pickle.loads(blob)
+                    except:
+                        return {}
 
-        # for non-gradient-correction training
-        if beta == 0:
-            if TRAINING_STRATEGY == "fedavg" or TRAINING_STRATEGY == "fedmut":
-                # 1. Use the simple train() function (No Gradient Accumulation overhead)
-                print(f"Training with {TRAINING_STRATEGY}...")
-                losses, accuracies = train(
-                    self.net, self.trainloader, self.optimizer, epochs=local_epochs
-                )
-                
-                # 2. Return ONLY weights (Standard Flower behavior)
-                # No packing, no gradients.
+            yi = decode_cv(yi_blob)
+            zi = decode_cv(zi_blob)
+
+            beta = config.get("beta", GRADIENT_CORRECTION_BETA)
+            local_epochs = config.get("local_epochs", LOCAL_EPOCHS)
+
+            # --- No Gradient Correction ---
+            if beta == 0:
+                if TRAINING_STRATEGY == "fedavg" or TRAINING_STRATEGY == "fedmut":
+                    losses, accuracies = train(
+                        self.net, self.trainloader, self.optimizer, epochs=local_epochs
+                    )
+                elif TRAINING_STRATEGY == "fedprox":
+                    losses, accuracies = train_fedprox(
+                        self.net, self.trainloader, self.optimizer, epochs=local_epochs, mu=FedProx_MU,
+                    )
                 return get_parameters(self.net), len(self.trainloader.dataset), {}
-            elif TRAINING_STRATEGY == "fedprox":
-                # 1. Use the FedProx train function
-                print("Training with FedProx...")
-                losses, accuracies = train_fedprox(
-                    self.net, self.trainloader, self.optimizer, epochs=local_epochs, mu=FedProx_MU,
+
+            # --- Gradient Correction Setup ---
+            device = next(self.net.parameters()).device
+            zi = {k: torch.as_tensor(v, dtype=torch.float32, device=device) for k, v in zi.items()}
+            yi = {k: torch.as_tensor(v, dtype=torch.float32, device=device) for k, v in yi.items()}
+
+            losses, accuracies, gradients = None, None, None
+            if TRAINING_STRATEGY == "fedprox":
+                losses, accuracies, gradients = train_fedprox_with_zi_yi(
+                    self.net, self.trainloader, self.optimizer,
+                    epochs=local_epochs, beta=beta, zi=zi, yi=yi
                 )
+            elif TRAINING_STRATEGY == "gfedavg":
+                losses, accuracies, gradients = gem_train_with_zi_yi(
+                    self.net, self.trainloader, self.optimizer,
+                    epochs=local_epochs, beta=beta, zi=zi, yi=yi
+                )
+            else:
+                losses, accuracies, gradients = train_with_zi_yi(
+                    self.net, self.trainloader, self.optimizer,
+                    epochs=local_epochs, beta=beta, zi=zi, yi=yi
+                )
+
+            # --- Logging ---
+            train_logger.log({
+                "round": self.round,
+                "loss": losses[0],
+                "accuracy": accuracies[0],
+                "data_samples": len(self.trainloader.dataset),
+            })
+
+            # --- Prepare Response ---
+            model_params_list = get_parameters(self.net)
+            grads_dict = {}
+            for name, p in self.net.named_parameters():
+                if gradients is not None and name in gradients:
+                    grads_dict[name] = gradients[name].cpu().numpy()
+            
+            model_u = get_payload_size(model_params_list)
+            model_c = model_u
+            before_quantization = get_payload_size(grads_dict)
+
+            grads_u = get_payload_size(gradients)
+            grads_c = grads_u
+            comp_time = 0.0
+            payload_tail = []
+
+            importance_scores = None
+            if COMPRESSION_METHOD == "shap":
+                importance_scores = get_gradient_shap_importance(self.net, self.trainloader, DEVICE)
+            elif COMPRESSION_METHOD == "fisher":
+                importance_scores = get_fisher_importance(self.net, self.trainloader, DEVICE)
+
+            # --- Compress ---
+            if COMPRESSION_METHOD != "none":
+                t_start = time.time()
+                compressed_grads_dict = compress_model_update(grads_dict, importance_scores=importance_scores)
+                packed_grads_blob = pack_compressed_data(compressed_grads_dict)
                 
-                # 2. Return ONLY weights (Standard Flower behavior)
-                # No packing, no gradients.
-                return get_parameters(self.net), len(self.trainloader.dataset), {}
+                payload_tail = [packed_grads_blob]
+                
+                # after_quantization = get_payload_size(compressed_grads_dict)
+                grads_c = get_payload_size(packed_grads_blob)
+                comp_time = time.time() - t_start
+                
+                print(f"Compressed: {before_quantization/1024:.1f}KB -> {grads_c/1024:.1f}KB")
+            else:
+                grads_list = []
+                for name, p in self.net.named_parameters():
+                    if name in grads_dict:
+                        grads_list.append(grads_dict[name])
+                    else:
+                        grads_list.append(np.zeros_like(p.data.cpu().numpy()))
+                payload_tail = grads_list
 
-        # convert numpy arrays -> torch tensors on correct device
-        device = next(self.net.parameters()).device
-        zi = {k: torch.tensor(v, dtype=torch.float32, device=device) for k, v in zi.items()}
-        yi = {k: torch.tensor(v, dtype=torch.float32, device=device) for k, v in yi.items()}
+            packed_params = model_params_list + payload_tail
 
-        losses, accuracies, gradients = None, None, None
-        if TRAINING_STRATEGY == "fedprox":
-            # --- train with gradient correction ---.
-            print("train Fedprox with gc")
-            losses, accuracies, gradients = train_fedprox_with_zi_yi(
-                self.net, self.trainloader, self.optimizer,
-                epochs=local_epochs, beta=beta, zi=zi, yi=yi
+            metrics = get_traffic_metrics(
+                round_num=config["round"],
+                direction="Uplink",
+                model_tuple=(model_u, model_c),
+                grad_tuple=(grads_u, grads_c),
+                comp_time=comp_time
             )
-        else:
-            # --- train with gradient correction ---
-            losses, accuracies, gradients = train_with_zi_yi(
-                self.net, self.trainloader, self.optimizer,
-                epochs=local_epochs, beta=beta, zi=zi, yi=yi
-            )
+            self.traffic_logger.log(metrics)
+            metrics_dict = {
+            "model_length": len(model_params_list), 
+            "is_compressed": compression_method != "none",
+            "client_name": args.name  # <--- CRITICAL: Send Identity
+            }
 
-        # --- logging ---
-        train_logger.log({
-            "round": self.round,
-            "loss": losses[0],
-            "accuracy": accuracies[0],
-            "data_samples": len(self.trainloader.dataset),
-        })
-
-        model_params_list = get_parameters(self.net)
-        grads_list = []
-        for name, p in self.net.named_parameters():
-            if p.requires_grad:
-                g_numpy = gradients[name].cpu().numpy()
-                grads_list.append(g_numpy)
+            return packed_params, len(self.trainloader.dataset), metrics_dict
         
-        # concat gradients after model parameters to use Flower's built-in parameter passing
-        packed_params = model_params_list + grads_list
+        except Exception as e:
+            print(f"❌ CLIENT EXCEPTION IN FIT: {e}")
+            traceback.print_exc()
+            raise e
 
-        return packed_params, len(self.trainloader.dataset), {"model_length": len(model_params_list)}
-    
     def evaluate(self, parameters, config):
         set_parameters(self.net, parameters)
         loss, accuracy = test(self.net, self.valloader)
@@ -209,42 +309,6 @@ def create_client(partition_id, model) -> fl.client.Client:
     net = model_module.Net().to(DEVICE)
 
     trainloader, valloader, testloader = load_datasets(partition_id=partition_id)
-    print("Trainloader size:", len(trainloader.dataset))
-    print("Valloader size:", len(valloader.dataset))
-    print("Testloader size:", len(testloader.dataset))
-    print("Trainloader summary:", get_dataloader_summary(trainloader))
-    print("Valloader summary:", get_dataloader_summary(valloader))
-    print("Testloader summary:", get_dataloader_summary(testloader))
-
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    with open(
-        os.path.join(
-            current_dir,
-            "logs",
-            EXPERIMENT_NAME,
-            "clients",
-            f"{args.name}_{args.partition_id}_data_dist.json",
-        ),
-        "w",
-    ) as f:
-        json.dump(
-            {
-                "trainloader": get_dataloader_summary(trainloader),
-                "valloader": get_dataloader_summary(valloader),
-                "testloader": get_dataloader_summary(testloader),
-            },
-            f,
-        )
-
-    url = f"{DASHBOARD_SERVER_URL}/experiment/{args.exp_id}/distribution/client"
-    dist = {
-        "trainloader": get_dataloader_summary(trainloader),
-        "valloader": get_dataloader_summary(valloader),
-        "testloader": get_dataloader_summary(testloader),
-    }
-    payload = {"device": args.name, "distribution": dist}
-    if ENABLE_DASHBOARD:
-        post_to_dashboard(url, payload)
 
     return FlowerClient(net, trainloader, valloader)
 
@@ -262,7 +326,6 @@ if __name__ == "__main__":
             )
             client.round += 1
         except Exception as e:
-            # traceback.print_exception(type(e), e, e.__traceback__, file=sys.stderr)
             print(f"Error: {type(e)}, Couldn't run client. Retrying in 5 seconds...")
 
         time.sleep(5)

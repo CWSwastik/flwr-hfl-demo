@@ -58,6 +58,7 @@ def main():
         proc = subprocess.Popen(cmd)
     except Exception as e:
         print(f"[Monitor] Error starting subprocess: {e}")
+        proc.terminate()
         return
 
     stop_event = threading.Event()

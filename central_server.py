@@ -5,12 +5,17 @@ from flwr.server import ServerConfig
 import argparse
 import matplotlib.pyplot as plt
 import numpy as np
-from config import NUM_ROUNDS, MODEL, SEED, GRADIENT_CORRECTION_BETA, FEDMUT_CENTRAL, FEDMUT_ALPHA
+from config import COMPRESS_YI, NUM_ROUNDS, MODEL, SEED, GRADIENT_CORRECTION_BETA, FEDMUT_CENTRAL, FEDMUT_ALPHA, COMPRESSION_METHOD
 from logger import Logger
-from utils import log_to_dashboard
 
-from utils import set_parameters, test, load_datasets, log_to_dashboard, get_parameters, generate_mutated_models
+from utils import (set_parameters, test, load_datasets, 
+                   log_to_dashboard, get_parameters, generate_mutated_models,
+                   unpack_compressed_data, decompress_model_update,
+                   compress_model_update, pack_compressed_data, get_traffic_metrics, 
+                   get_payload_size,)
 from flwr.common import parameters_to_ndarrays, FitIns, ndarrays_to_parameters, FitRes
+import time
+import pickle
 
 parser = argparse.ArgumentParser(description="Start the Flower central server.")
 parser.add_argument(
@@ -63,7 +68,20 @@ class FedAvgWithGradientCorrection(fl.server.strategy.FedAvg):
         model_module = importlib.import_module(f"models.{MODEL}")
         ref_net = model_module.Net()
         self.num_model_layers = len(get_parameters(ref_net))
-        self.grad_names = [n for n, p in ref_net.named_parameters() if p.requires_grad]
+        self.grad_names = [n for n, p in ref_net.named_parameters()]
+        self.grad_shapes = {n: p.shape for n, p in ref_net.named_parameters()}
+        self.traffic_logger = Logger(
+            subfolder="central",
+            file_path="traffic.csv",
+            headers=[
+                "Round", "Direction", 
+                "model_wts_MB", "compressed_model_wts_MB",
+                "Y_i_MB", "compressed_Y_i_MB", 
+                "Z_i_MB", "compressed_Z_i_MB", 
+                "Total_MB", "Compressed_Total_MB",
+                "compression_time_s", "decompression_time_s"
+            ]
+        )
 
     def aggregate_fit(self, rnd, results, failures):
 
@@ -78,14 +96,39 @@ class FedAvgWithGradientCorrection(fl.server.strategy.FedAvg):
         for client, fit_res in results:
             # 1. Unpack
             packed_params = parameters_to_ndarrays(fit_res.parameters)
+            is_compressed = fit_res.metrics.get("is_compressed", False)
+            edge_name = fit_res.metrics.get("client_name", "Unknown_Edge")
+            print(f"Received update from Edge-{edge_name}")
             
             # 2. Slice: Weights [0 : N] | Gradients [N : end]
             weights = packed_params[:self.num_model_layers]
-            raw_grads = packed_params[self.num_model_layers:]
+            packed_tail = packed_params[self.num_model_layers:]
             
-            # 3. Reconstruct Gradient Dictionary
-            # The edge server sent its 'group_avg_grad' as the packed gradients
-            edge_grad_dict = dict(zip(self.grad_names, raw_grads))
+            edge_grad_dict = {}
+
+            # Decompression Logic
+            if is_compressed and len(packed_tail) > 0:
+                # print(f"[Central Server] Decompressing update from Edge {getattr(client, 'cid', 'N/A')}")
+                blob = packed_tail[0]
+                compressed_dict = unpack_compressed_data(blob)
+                edge_grad_dict = decompress_model_update(compressed_dict)
+            else:
+                # Standard raw list of gradients -> Convert to Dict
+                raw_list = packed_tail
+
+                if len(raw_list) != len(self.grad_names):
+                    print(f"[Warning] Central: Gradient length mismatch! Expected {len(self.grad_names)}, got {len(raw_list)}")
+
+                # 3. Reconstruct Gradient Dictionary
+                # The edge server sent its 'group_avg_grad' as the packed gradients
+                edge_grad_dict = dict(zip(self.grad_names, raw_list))
+            
+            # --- Safety Padding (Fill missing layers with Zeros) ---
+            for name in self.grad_names:
+                if name not in edge_grad_dict:
+                    # Use stored shape to create zero tensor
+                    edge_grad_dict[name] = np.zeros(self.grad_shapes[name])
+
             group_grads.append(edge_grad_dict)
             clients_list.append(client)
 
@@ -106,26 +149,28 @@ class FedAvgWithGradientCorrection(fl.server.strategy.FedAvg):
 
             # Average across all groups (edges)
             global_avg_grad = {}
-            for name in self.grad_names:
-            # for name in group_grads[0]:
-                global_avg_grad[name] = np.mean([gg[name] for gg in group_grads], axis=0)
+            if group_grads:
+                for name in self.grad_names:
+                # for name in group_grads[0]:
+                    global_avg_grad[name] = np.mean([gg[name] for gg in group_grads], axis=0)
 
-            # Convert global_avg_grad to lists (JSON-safe)
-            global_avg_grad_serializable = {name: grad.tolist() for name, grad in global_avg_grad.items()}
+                # Convert global_avg_grad to lists (JSON-safe)
+                global_avg_grad_serializable = {name: grad.tolist() for name, grad in global_avg_grad.items()}
 
-            # Compute yi for each group: yi_j = global_avg_grad - group_avg_grad_j
-            yi_per_group = {}
-            for client, group_grad in zip(clients_list, group_grads):
-            # for (client, _), group_grad in zip(results, group_grads):
-                client_id = getattr(client, "cid", None)
-                yi_per_group[client_id] = {name: (global_avg_grad[name] - group_grad[name]).tolist()
-                                        for name in group_grad}
+                # Compute yi for each group: yi_j = global_avg_grad - group_avg_grad_j
+                yi_per_group = {}
+                for client, group_grad in zip(clients_list, group_grads):
+                # for (client, _), group_grad in zip(results, group_grads):
+                    client_id = getattr(client, "cid", None)
+                    # old yi
+                    yi_per_group[client_id] = {name: (global_avg_grad[name] - group_grad[name]).tolist()
+                                            for name in group_grad}
 
-            # Save yi for next round
-            self.yi_per_group = yi_per_group
-            self.global_avg_grad = global_avg_grad_serializable
+                # Save yi for next round
+                self.yi_per_group = yi_per_group
+                self.global_avg_grad = global_avg_grad_serializable
 
-            print(f"[Central Server] Computed yi for {len(yi_per_group)} groups.")
+                print(f"[Central Server] Computed yi for {len(yi_per_group)} groups.")
 
         return aggregated_parameters
 
@@ -177,16 +222,80 @@ class FedAvgWithGradientCorrection(fl.server.strategy.FedAvg):
                 # Use standard global model
                 client_parameters = fit_ins.parameters
 
-            # Fetch yi from yi_per_group
-            yi = self.yi_per_group.get(
-                cid, {name: 0.0 for name in self.grad_names} #cfg.get("zi", {})}
-            )
+            default_yi = {
+                name: np.zeros(shape) 
+                for name, shape in self.grad_shapes.items()
+            }
 
-            # Add yi to config
-            cfg["yi"] = json.dumps(yi)
+            # Fetch yi from yi_per_group
+            yi = self.yi_per_group.get(cid, default_yi)
+            yi_blob = b""
+            yi_is_compressed = False
+
+            # --- Metrics Logic ---
+            # A. Model Size
+            model_payload = parameters_to_ndarrays(fit_ins.parameters)
+            model_u = get_payload_size(model_payload)
+            model_c = model_u # No compression on model weights
+
+            # B. Yi Size & Compression Time
+            yi_u = get_payload_size(yi)
+            yi_c = yi_u
+            comp_time = 0.0
+
+            if COMPRESSION_METHOD != "none" and COMPRESS_YI and yi:
+                # 1. Convert to dict for maintaining key names(layer names)
+                yi_dict_to_send = {}
+
+                for k in self.grad_names:
+                    if k in yi:
+                        val = yi[k]
+                        if isinstance(val, list):
+                            val = np.array(val)
+                        yi_dict_to_send[k] = val
+
+                comp_start = time.time()
+                # 2. Compress & Pack
+                compressed_yi = compress_model_update(yi_dict_to_send)
+                yi_array = pack_compressed_data(compressed_yi)
+                yi_blob = yi_array.tobytes() 
+                comp_time = time.time() - comp_start
+                yi_c = get_payload_size(yi_blob)
+                yi_is_compressed = True
+
+                # # 3. Append to parameters (Weights + Blob)
+                # client_weights = parameters_to_ndarrays(fit_ins.parameters)
+                # full_payload = client_weights + [yi_blob]
+
+                # client_parameters = ndarrays_to_parameters(full_payload)
+                # cfg["yi_compressed"] = True # Flag for Edge Server to decompress
+
+            else:
+                # Fallback (Existing logic)
+                # yi_serializable = {k: v.tolist() if isinstance(v, np.ndarray) else v for k, v in yi.items()}
+                # # cfg["yi"] = json.dumps(yi_serializable)
+                # cfg["yi"] = pickle.dumps(yi_serializable)
+                # client_parameters = fit_ins.parameters
+                yi_blob = pickle.dumps(yi)
+                yi_is_compressed = False
+            
+            cfg["yi"] = yi_blob
+            cfg["yi_compressed"] = yi_is_compressed
+            target_id = f"Edge_Index_{i}"
+            # --- Log Traffic Metrics ---
+            metrics = get_traffic_metrics(
+            round_num=server_round,
+            direction=f"Downlink_to_{target_id}",
+                model_tuple=(model_u, model_c),
+                yi_tuple=(yi_u, yi_c),
+                comp_time=comp_time 
+            )
+            self.traffic_logger.log(metrics)
+
+            del model_payload                        
 
             # Re-wrap as FitIns and append with ClientProxy
-            new_fit_instructions.append((client, FitIns(fit_ins.parameters, cfg)))
+            new_fit_instructions.append((client, FitIns(client_parameters, cfg)))
 
         return new_fit_instructions
 
