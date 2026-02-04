@@ -18,7 +18,6 @@ import config
 import pickle
 from utils import (
     decompress_model_update,
-    gem_train_with_zi_yi,
     get_fisher_importance,
     load_datasets,
     get_parameters,
@@ -188,11 +187,6 @@ class FlowerClient(fl.client.NumPyClient):
             losses, accuracies, gradients = None, None, None
             if TRAINING_STRATEGY == "fedprox":
                 losses, accuracies, gradients = train_fedprox_with_zi_yi(
-                    self.net, self.trainloader, self.optimizer,
-                    epochs=local_epochs, beta=beta, zi=zi, yi=yi
-                )
-            elif TRAINING_STRATEGY == "gfedavg":
-                losses, accuracies, gradients = gem_train_with_zi_yi(
                     self.net, self.trainloader, self.optimizer,
                     epochs=local_epochs, beta=beta, zi=zi, yi=yi
                 )
