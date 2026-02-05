@@ -13,7 +13,7 @@ from utils import (set_parameters, test, load_datasets,
                    unpack_compressed_data, decompress_model_update,
                    compress_model_update, pack_compressed_data, get_traffic_metrics, 
                    get_payload_size,)
-from flwr.common import parameters_to_ndarrays, FitIns, ndarrays_to_parameters, FitRes
+from flwr.common import parameters_to_ndarrays, FitIns, ndarrays_to_parameters, FitRes, GetPropertiesIns
 import time
 import pickle
 
@@ -90,14 +90,14 @@ class FedAvgWithGradientCorrection(fl.server.strategy.FedAvg):
             return super().aggregate_fit(rnd, results, failures)
         
         valid_results = []
-        group_grads = [] # Stores the gradient dictionaries from edges
+        group_grads = {}
         clients_list = []
 
         for client, fit_res in results:
             # 1. Unpack
             packed_params = parameters_to_ndarrays(fit_res.parameters)
             is_compressed = fit_res.metrics.get("is_compressed", False)
-            edge_name = fit_res.metrics.get("client_name", "Unknown_Edge")
+            edge_name = fit_res.metrics.get("client_name", getattr(client, "cid", "unknown"))
             print(f"Received update from Edge-{edge_name}")
             
             # 2. Slice: Weights [0 : N] | Gradients [N : end]
@@ -129,7 +129,7 @@ class FedAvgWithGradientCorrection(fl.server.strategy.FedAvg):
                     # Use stored shape to create zero tensor
                     edge_grad_dict[name] = np.zeros(self.grad_shapes[name])
 
-            group_grads.append(edge_grad_dict)
+            group_grads[edge_name] = edge_grad_dict
             clients_list.append(client)
 
             # 4. Create CLEAN FitRes (Weights only) for standard FedAvg
@@ -150,21 +150,23 @@ class FedAvgWithGradientCorrection(fl.server.strategy.FedAvg):
             # Average across all groups (edges)
             global_avg_grad = {}
             if group_grads:
+                all_grads = list(group_grads.values())
                 for name in self.grad_names:
                 # for name in group_grads[0]:
-                    global_avg_grad[name] = np.mean([gg[name] for gg in group_grads], axis=0)
+                    global_avg_grad[name] = np.mean([gg[name] for gg in all_grads], axis=0)
 
                 # Convert global_avg_grad to lists (JSON-safe)
                 global_avg_grad_serializable = {name: grad.tolist() for name, grad in global_avg_grad.items()}
 
                 # Compute yi for each group: yi_j = global_avg_grad - group_avg_grad_j
                 yi_per_group = {}
-                for client, group_grad in zip(clients_list, group_grads):
+                # for client, group_grad in zip(clients_list, group_grads):
                 # for (client, _), group_grad in zip(results, group_grads):
-                    client_id = getattr(client, "cid", None)
+                for c_name, g_grad in group_grads.items():
+                    # client_id = getattr(client, "cid", None)
                     # old yi
-                    yi_per_group[client_id] = {name: (global_avg_grad[name] - group_grad[name]).tolist()
-                                            for name in group_grad}
+                    yi_per_group[c_name] = {name: (global_avg_grad[name] - g_grad[name]).tolist()
+                                            for name in g_grad}
 
                 # Save yi for next round
                 self.yi_per_group = yi_per_group
@@ -209,6 +211,12 @@ class FedAvgWithGradientCorrection(fl.server.strategy.FedAvg):
         new_fit_instructions = []
 
         for i, (client, fit_ins) in enumerate(fit_instructions):
+            c_name = "unknown"
+            try:
+                res = client.get_properties(GetPropertiesIns(config={}), timeout=10.0, group_id=0)
+                c_name = res.properties["client_name"]
+            except:
+                pass
             cfg = fit_ins.config.copy()  # make a copy
 
             # Get client_id from config or ClientProxy
@@ -228,7 +236,8 @@ class FedAvgWithGradientCorrection(fl.server.strategy.FedAvg):
             }
 
             # Fetch yi from yi_per_group
-            yi = self.yi_per_group.get(cid, default_yi)
+            # yi = self.yi_per_group.get(cid, default_yi)
+            yi = self.yi_per_group.get(c_name, {})
             yi_blob = b""
             yi_is_compressed = False
 
@@ -281,7 +290,7 @@ class FedAvgWithGradientCorrection(fl.server.strategy.FedAvg):
             
             cfg["yi"] = yi_blob
             cfg["yi_compressed"] = yi_is_compressed
-            target_id = f"Edge_Index_{i}"
+            target_id = c_name if c_name != "unknown" else f"Edge_Index_{i}"
             # --- Log Traffic Metrics ---
             metrics = get_traffic_metrics(
             round_num=server_round,

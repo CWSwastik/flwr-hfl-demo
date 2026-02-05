@@ -9,6 +9,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torchvision.transforms as transforms
 from torch.utils.data import DataLoader
+import random
 
 import flwr
 from typing import Optional
@@ -31,6 +32,7 @@ if torch.cuda.is_available():
 
 from config import (
     NUM_CLIENTS,
+    SEED,
     TRAINING_LEARNING_RATE,
     BATCH_SIZE,
     PARTITIONER,
@@ -42,6 +44,12 @@ from config import (
     QUANTIZATION_BITS, 
     TOPK_RATIO
 )
+
+random.seed(SEED)
+np.random.seed(SEED)
+torch.manual_seed(SEED)
+if torch.cuda.is_available():
+    torch.cuda.manual_seed_all(SEED)
 
 
 def load_datasets(partition_id: Optional[int] = None):
@@ -63,6 +71,7 @@ def load_datasets(partition_id: Optional[int] = None):
             partition_by="label",
             alpha=DIRICHLET_ALPHA,  # 0.9
             self_balancing=True,
+            seed=SEED,
         )
     else:
         partitioner = PathologicalPartitioner(

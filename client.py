@@ -6,6 +6,7 @@ import os
 
 import json
 import flwr as fl
+from flwr.common import GetPropertiesIns, GetPropertiesRes, Status, Code
 import numpy as np
 import time
 import argparse
@@ -13,6 +14,7 @@ import requests
 import torch
 import traceback
 import sys
+import random
 
 import config
 import pickle
@@ -63,7 +65,11 @@ from logger import Logger
 from torch.optim import Adam
 from torch.optim.lr_scheduler import StepLR
 
+random.seed(SEED)
+np.random.seed(SEED)
 torch.manual_seed(SEED)
+if torch.cuda.is_available():
+    torch.cuda.manual_seed_all(SEED)
 
 parser = argparse.ArgumentParser(description="Start a Flower client.")
 parser.add_argument(
@@ -126,6 +132,12 @@ class FlowerClient(fl.client.NumPyClient):
             ]
         )
 
+    def get_properties(self, config):
+        """Allows the server to query the client's name."""
+        return {
+            "client_name": args.name  # Return the static name (e.g., 'client_1')
+        }
+    
     def get_parameters(self, config):
         return get_parameters(self.net)
 

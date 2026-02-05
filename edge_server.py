@@ -4,7 +4,7 @@ import sys
 import traceback
 import flwr as fl
 from flwr.server import ServerConfig
-from flwr.common import parameters_to_ndarrays, ndarrays_to_parameters, FitIns, FitRes, Parameters, Status, Code
+from flwr.common import parameters_to_ndarrays, ndarrays_to_parameters, FitIns, FitRes, Parameters, Status, Code, GetPropertiesIns
 import numpy as np
 import multiprocessing
 import argparse
@@ -106,6 +106,7 @@ class EdgeStrategy(fl.server.strategy.FedAvg):
 
         # --- Custom Aggregation Logic ---
         valid_results = []
+        client_grads_by_name = {}
         client_grads = []
         clients_list = []
         client_names = []
@@ -145,6 +146,7 @@ class EdgeStrategy(fl.server.strategy.FedAvg):
             clients_list.append(client)
 
             c_name = fit_res.metrics.get("client_name", "Unknown")
+            client_grads_by_name[c_name] = c_grad_dict
             client_names.append(c_name)
             
             # 5. Clean FitRes
@@ -159,7 +161,7 @@ class EdgeStrategy(fl.server.strategy.FedAvg):
         # 6. Call Super (Weights Aggregation)
         aggregated_parameters = super().aggregate_fit(rnd, valid_results, failures)
         
-        if aggregated_parameters is not None:
+        if aggregated_parameters is not None and client_grads_by_name:
             self.shared_state["aggregated_model"] = aggregated_parameters[0]
             examples = [r.num_examples for _, r in valid_results]
             self.shared_state["num_examples"] = sum(examples)
@@ -170,19 +172,24 @@ class EdgeStrategy(fl.server.strategy.FedAvg):
 
             # 7. Compute Average Gradient
             avg_grad = {}
-            for name in client_grads[0]:
-                avg_grad[name] = np.mean([cg[name] for cg in client_grads], axis=0)
+            all_grads = list(client_grads_by_name.values())
+            for name in self.grad_names:
+                avg_grad[name] = np.mean([cg[name] for cg in all_grads], axis=0)
+            # for name in client_grads[0]:
+            #     avg_grad[name] = np.mean([cg[name] for cg in client_grads], axis=0)
 
             # Compute zi_per_client as differences
             zi_per_client = {}
             # Store Zi by INDEX (0, 1, 2...)
             # We use index because CIDs change every round.
-            for i, grads in enumerate(client_grads):
-                # Calculate Zi
-                zi_value = {name: (avg_grad[name] - grads[name]).tolist() for name in grads}
-                zi_per_client[i] = zi_value
+            # for i, grads in enumerate(client_grads):
+            #     # Calculate Zi
+            #     zi_value = {name: (avg_grad[name] - grads[name]).tolist() for name in grads}
+            #     zi_per_client[i] = zi_value
                 # Map Index to Name for logging later
-                self.shared_state[f"name_map_{i}"] = client_names[i]
+                # self.shared_state[f"name_map_{i}"] = client_names[i]
+            for c_name, grad in client_grads_by_name.items():
+                zi_per_client[c_name] = {k: avg_grad[k] - grad[k] for k in grad}
 
             # for client, grads in zip(clients_list, client_grads):
             #     client_id_str = getattr(client, "cid", str(client))
@@ -325,7 +332,18 @@ class EdgeStrategy(fl.server.strategy.FedAvg):
         new_fit_instructions = []
 
         for i, (client, fit_ins) in enumerate(fit_instructions):
-            cid = getattr(client, "cid", None)
+            # cid = getattr(client, "cid", None)
+            c_name = "unknown"
+            try:
+                # This blocks until client replies (or timeout)
+                res = client.get_properties(
+                    GetPropertiesIns(config={}), 
+                    timeout=10.0,
+                    group_id=0 # Required by GrpcClientProxy
+                )
+                c_name = res.properties["client_name"]
+            except Exception as e:
+                print(f"[Edge Server] Failed to query properties from client {client}: {e}")
 
             client_parameters = fit_ins.parameters
             if use_mutation:
@@ -334,8 +352,8 @@ class EdgeStrategy(fl.server.strategy.FedAvg):
                 client_parameters = ndarrays_to_parameters(mutated_weights_list[i])
 
             # client_zi = zi_per_client.get(cid, None)
-            client_zi = zi_per_client.get(i, {})
-            target_name = f"Client_Index_{i}"
+            client_zi = zi_per_client.get(c_name, {})
+            # target_name = f"Client_Index_{i}"
 
             if client_zi is None and zi_per_client:
                  # Fallback logic
@@ -373,7 +391,7 @@ class EdgeStrategy(fl.server.strategy.FedAvg):
                 "yi": final_yi_blob,
                 "yi_compressed": final_yi_compressed,
                 "beta": beta,
-                "cid": cid,
+                # "cid": cid,
                 "compression_method": COMPRESSION_METHOD 
             })
 
@@ -385,7 +403,7 @@ class EdgeStrategy(fl.server.strategy.FedAvg):
             metrics = get_traffic_metrics(
                 round_num=current_global_round,
                 # direction=f"Downlink_to_{getattr(client, 'cid', 'unknown')}",
-                direction=f"Downlink_to_{target_name}",
+                direction=f"Downlink_to_{c_name}",
                 model_tuple=(model_u, model_c),
                 yi_tuple=(yi_u, yi_c),
                 zi_tuple=(zi_u, zi_c),
@@ -433,6 +451,9 @@ def run_edge_as_client(shared_state):
                 ]
             )
 
+        def get_properties(self, config):
+            return {"client_name": args.name}
+        
         def get_parameters(self, config):
             if self.shared_state.get("aggregated_model") is not None:
                 return parameters_to_ndarrays(self.shared_state["aggregated_model"])
@@ -522,7 +543,7 @@ def run_edge_as_client(shared_state):
                         payload_tail = [packed_blob]
                         comp_time = t_end - t_start
                         grad_c = get_payload_size(packed_blob)
-                        metrics = {"is_compressed": True, "model_length": len(edge_weights)}
+                        metrics = {"is_compressed": True, "model_length": len(edge_weights), "client_name": args.name}
                     else:
                         grad_list_padded = []
                         for name, p in ref_net.named_parameters():
@@ -532,7 +553,7 @@ def run_edge_as_client(shared_state):
                                 grad_list_padded.append(np.zeros_like(p.detach().cpu().numpy()))
                                 
                         payload_tail = grad_list_padded
-                        metrics = {"is_compressed": False, "model_length": len(edge_weights)}
+                        metrics = {"is_compressed": False, "model_length": len(edge_weights), "client_name": args.name}
 
                     metrics_dict = get_traffic_metrics(
                         round_num=config["round"],
