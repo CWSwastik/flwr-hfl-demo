@@ -167,7 +167,7 @@ def train_with_zi_yi(net, trainloader, optimizer, epochs, beta, zi, yi, verbose=
     # accumulator for average gradients
     grad_accumulator = {name: torch.zeros_like(p, device=DEVICE) 
                         for name, p in net.named_parameters() if p.requires_grad}
-    num_batches = 0
+    num_batches = 0 # H in MTGC number of steps
 
     for epoch in range(epochs):
         correct, total, epoch_loss = 0, 0, 0.0
@@ -182,35 +182,45 @@ def train_with_zi_yi(net, trainloader, optimizer, epochs, beta, zi, yi, verbose=
             with torch.no_grad():
                 for name, p in net.named_parameters():
                     if p.grad is not None:
-                        correction = beta * (zi.get(name, 0.0) + yi.get(name, 0.0))
-                        p.grad += correction
+                        grad_accumulator[name].add_(p.grad.clone())
+                        zi_t = None if zi is None else zi.get(name, None)
+                        yi_t = None if yi is None else yi.get(name, None)
 
-            # --- accumulate gradients ---
-            with torch.no_grad():
-                for name, p in net.named_parameters():
-                    if p.grad is not None:
-                        grad_accumulator[name] += p.grad.clone()
+                        if zi_t is None:
+                            zi_t = torch.zeros_like(p.grad)
+                        else:
+                            zi_t = zi_t.to(device=p.grad.device, dtype=p.grad.dtype)
+
+                        if yi_t is None:
+                            yi_t = torch.zeros_like(p.grad)
+                        else:
+                            yi_t = yi_t.to(device=p.grad.device, dtype=p.grad.dtype)
+                        
+                        # apply correction to the actual gradient used in optimizer.step()
+                        p.grad.add_(beta * (zi_t + yi_t))       
 
             optimizer.step()
             num_batches += 1
 
             # metrics
-            epoch_loss += loss.item()
-            total += labels.size(0)
-            correct += (torch.max(outputs.data, 1)[1] == labels).sum().item()
+            bs = labels.size(0)
+            epoch_loss += loss.item() * bs
+            total += bs
+            correct += (outputs.argmax(dim=1) == labels).sum().item()
 
-        epoch_loss /= len(trainloader.dataset)
+        epoch_loss /= total
         epoch_acc = correct / total
         losses.append(epoch_loss)
         accuracies.append(epoch_acc)
         if verbose:
             print(f"Epoch {epoch+1}: train loss {epoch_loss:.4f}, accuracy {epoch_acc:.4f}")
 
-    # average gradients
-    for name in grad_accumulator:
-        grad_accumulator[name] /= num_batches
+    # # average gradients
+    # for name in grad_accumulator:
+    #     grad_accumulator[name] /= max(1,num_batches)
 
-    return losses, accuracies, grad_accumulator
+    # return losses, accuracies, grad_accumulator, num_batches
+    return losses, accuracies, None, num_batches
 
 def train_fedprox_with_zi_yi(net, trainloader, optimizer: torch.optim.Adam, epochs: int, beta, zi, yi, verbose=False, mu=0.01):
     """Train the network on the training set."""
@@ -224,7 +234,7 @@ def train_fedprox_with_zi_yi(net, trainloader, optimizer: torch.optim.Adam, epoc
     grad_accumulator = {name: torch.zeros_like(p, device=DEVICE) 
                         for name, p in net.named_parameters() if p.requires_grad}
     
-    num_batches = 0
+    num_batches = 0 # H in MTGC number of steps
     for epoch in range(epochs):
         correct, total, epoch_loss = 0, 0, 0.0
         for batch in trainloader:
@@ -244,22 +254,32 @@ def train_fedprox_with_zi_yi(net, trainloader, optimizer: torch.optim.Adam, epoc
             with torch.no_grad():
                 for name, p in net.named_parameters():
                     if p.grad is not None:
-                        correction = beta * (zi.get(name, 0.0) + yi.get(name, 0.0))
-                        p.grad += correction
+                        zi_t = None if zi is None else zi.get(name, None)
+                        yi_t = None if yi is None else yi.get(name, None)
 
-            # --- accumulate gradients ---
-            with torch.no_grad():
-                for name, p in net.named_parameters():
-                    if p.grad is not None:
-                        grad_accumulator[name] += p.grad.clone()
+                        if zi_t is None:
+                            zi_t = torch.zeros_like(p.grad)
+                        else:
+                            zi_t = zi_t.to(device=p.grad.device, dtype=p.grad.dtype)
+
+                        if yi_t is None:
+                            yi_t = torch.zeros_like(p.grad)
+                        else:
+                            yi_t = yi_t.to(device=p.grad.device, dtype=p.grad.dtype)
+                        
+                        # apply correction to the actual gradient used in optimizer.step()
+                        p.grad.add_(beta * (zi_t + yi_t))
+                        grad_accumulator[name].add_(p.grad)
 
             optimizer.step()
             num_batches += 1
             # Metrics
-            epoch_loss += loss
-            total += labels.size(0)
-            correct += (torch.max(outputs.data, 1)[1] == labels).sum().item()
-        epoch_loss /= len(trainloader.dataset)
+            bs = labels.size(0)
+            epoch_loss += loss.item() * bs
+            total += bs
+            correct += (outputs.argmax(dim=1) == labels).sum().item()
+
+        epoch_loss /= total
         epoch_acc = correct / total
 
         losses.append(epoch_loss.item())
@@ -268,11 +288,11 @@ def train_fedprox_with_zi_yi(net, trainloader, optimizer: torch.optim.Adam, epoc
             print(f"Epoch {epoch+1}: train loss {epoch_loss}, accuracy {epoch_acc}")
     # average gradients
     for name in grad_accumulator:
-        grad_accumulator[name] /= num_batches
+        grad_accumulator[name] /= max(1,num_batches)
 
     del global_params
 
-    return losses, accuracies, grad_accumulator
+    return losses, accuracies, grad_accumulator, num_batches
 
 def train_fedprox(net, trainloader, optimizer: torch.optim.Adam, epochs: int, verbose=False, mu=0.01):
     """Train the network on the training set."""
@@ -454,6 +474,47 @@ def get_fisher_importance(model, data_loader, device, num_batches=1):
         
     return final_scores
 
+def topk_mask_from_importance(importance_scores: Dict[str, np.ndarray], topk_ratio: float) -> Dict[str, Dict]:
+    """
+    Returns per-layer top-k indices (no values).
+    mask[name] = {"idxs": np.ndarray[int32], "shape": tuple}
+    """
+    mask = {}
+    for name, score in importance_scores.items():
+        score_t = torch.tensor(score).flatten()
+        k = max(1, int(score_t.numel() * topk_ratio))
+        _, idxs = torch.topk(score_t, k)
+        mask[name] = {
+            "idxs": idxs.cpu().numpy().astype(np.int32),
+            "shape": tuple(score.shape),
+        }
+    return mask
+
+def compress_with_mask(model_diff: Dict[str, np.ndarray], mask: Dict[str, Dict]) -> Dict:
+    """
+    Compress model_diff using client-provided indices.
+    Output format matches your existing sparse structure (idxs, vals, shape).
+    """
+    compressed_layers = []
+    for name, layer in model_diff.items():
+        layer_t = torch.tensor(layer)
+        flat = layer_t.flatten()
+
+        if name not in mask:
+            # fallback: send nothing for this layer
+            continue
+
+        idxs = torch.tensor(mask[name]["idxs"], dtype=torch.long)
+        vals = flat[idxs].cpu().numpy()
+        compressed_layers.append({
+            "name": name,
+            "vals": vals,
+            "idxs": idxs.cpu().numpy(),
+            "shape": mask[name]["shape"],
+        })
+    return {"method": "mask", "layers": compressed_layers}
+
+
 def compress_model_update(model_diff: Dict[str, np.ndarray], importance_scores: Dict[str, np.ndarray] = None) -> Dict:
     """
     Compresses the difference (gradient/update/yi/zi).
@@ -542,7 +603,7 @@ def decompress_model_update(compressed_payload: Union[Dict, Dict[str, np.ndarray
             rec = (q / layer_data["scale"]) + layer_data["min"]
             decompressed_dict[name] = rec.numpy()
             
-    elif method in ["topk", "shap", "fisher"]:
+    elif method in ["topk", "shap", "fisher", "mask"]:
         # All sparse methods use the same reconstruction logic
         for layer_data in compressed_payload["layers"]:
             name = layer_data["name"]

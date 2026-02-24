@@ -5,7 +5,7 @@ from flwr.server import ServerConfig
 import argparse
 import matplotlib.pyplot as plt
 import numpy as np
-from config import COMPRESS_YI, NUM_ROUNDS, MODEL, SEED, GRADIENT_CORRECTION_BETA, FEDMUT_CENTRAL, FEDMUT_ALPHA, COMPRESSION_METHOD
+from config import NUM_ROUNDS, MODEL, SEED, GRADIENT_CORRECTION_BETA, FEDMUT_CENTRAL, FEDMUT_ALPHA
 from logger import Logger
 
 from utils import (set_parameters, test, load_datasets, 
@@ -53,6 +53,16 @@ np.random.seed(seed=SEED)
 
 class FedAvgWithGradientCorrection(fl.server.strategy.FedAvg):
     def __init__(self, min_fit_clients, min_available_clients, initial_parameters=None):
+        """
+        Initializes the Central Server strategy for Hierarchical Federated Learning.
+        
+        Functionality:
+        1. Calls the parent FedAvg constructor to handle basic client sampling and tracking.
+        2. Stores the initial global parameters for mutation history tracking (if FedMut is enabled).
+        3. Instantiates a reference neural network to dynamically extract layer names 
+           and calculate the exact number of layers (num_model_layers).
+        4. Initializes a Traffic Logger to record the Downlink bandwidth usage (Cloud -> Edge).
+        """
         super().__init__(
             min_fit_clients=min_fit_clients,
             min_available_clients=min_available_clients,
@@ -67,9 +77,14 @@ class FedAvgWithGradientCorrection(fl.server.strategy.FedAvg):
         # Calculate the split index for weights vs gradients
         model_module = importlib.import_module(f"models.{MODEL}")
         ref_net = model_module.Net()
-        self.num_model_layers = len(get_parameters(ref_net))
+        # self.num_model_layers = len(get_parameters(ref_net))
         self.grad_names = [n for n, p in ref_net.named_parameters()]
+        self.num_model_layers = len(self.grad_names)
         self.grad_shapes = {n: p.shape for n, p in ref_net.named_parameters()}
+
+        self.state_keys = list(ref_net.state_dict().keys())
+        self.param_index = {name: self.state_keys.index(name) for name in self.grad_names}
+
         self.traffic_logger = Logger(
             subfolder="central",
             file_path="traffic.csv",
@@ -84,101 +99,69 @@ class FedAvgWithGradientCorrection(fl.server.strategy.FedAvg):
         )
 
     def aggregate_fit(self, rnd, results, failures):
+        """
+        Aggregates the group models received from Edge Servers to form the new Global Model.
+        
+        Functionality:
+        1. Bypasses custom logic if Gradient Correction is disabled (Beta == 0).
+        2. Unpacks the results received from each Edge Server.
+        3. Slices the payload to extract ONLY the model weights, ignoring any extra 
+           trailing data (which handles backward compatibility if an edge sent gradients).
+        4. Filters out any Edge Servers that failed (returned 0 examples) to prevent 
+           ZeroDivisionError crashes and mathematical poisoning.
+        5. Passes the clean, filtered weights to standard FedAvg for global aggregation.
+        """
 
         if GRADIENT_CORRECTION_BETA == 0:
             # Standard aggregation only
             return super().aggregate_fit(rnd, results, failures)
         
         valid_results = []
-        group_grads = {}
         clients_list = []
 
         for client, fit_res in results:
             # 1. Unpack
             packed_params = parameters_to_ndarrays(fit_res.parameters)
-            is_compressed = fit_res.metrics.get("is_compressed", False)
             edge_name = fit_res.metrics.get("client_name", getattr(client, "cid", "unknown"))
             print(f"Received update from Edge-{edge_name}")
             
             # 2. Slice: Weights [0 : N] | Gradients [N : end]
-            weights = packed_params[:self.num_model_layers]
-            packed_tail = packed_params[self.num_model_layers:]
+            model_len = fit_res.metrics.get("model_length", len(packed_params))
+            weights = packed_params[:model_len]
+            packed_tail = packed_params[model_len:]
             
-            edge_grad_dict = {}
-
-            # Decompression Logic
-            if is_compressed and len(packed_tail) > 0:
-                # print(f"[Central Server] Decompressing update from Edge {getattr(client, 'cid', 'N/A')}")
-                blob = packed_tail[0]
-                compressed_dict = unpack_compressed_data(blob)
-                edge_grad_dict = decompress_model_update(compressed_dict)
-            else:
-                # Standard raw list of gradients -> Convert to Dict
-                raw_list = packed_tail
-
-                if len(raw_list) != len(self.grad_names):
-                    print(f"[Warning] Central: Gradient length mismatch! Expected {len(self.grad_names)}, got {len(raw_list)}")
-
-                # 3. Reconstruct Gradient Dictionary
-                # The edge server sent its 'group_avg_grad' as the packed gradients
-                edge_grad_dict = dict(zip(self.grad_names, raw_list))
-            
-            # --- Safety Padding (Fill missing layers with Zeros) ---
-            for name in self.grad_names:
-                if name not in edge_grad_dict:
-                    # Use stored shape to create zero tensor
-                    edge_grad_dict[name] = np.zeros(self.grad_shapes[name])
-
-            group_grads[edge_name] = edge_grad_dict
             clients_list.append(client)
 
             # 4. Create CLEAN FitRes (Weights only) for standard FedAvg
-            new_fit_res = FitRes(
-                status=fit_res.status,
-                parameters=ndarrays_to_parameters(weights),
-                num_examples=fit_res.num_examples,
-                metrics=fit_res.metrics,
-            )
-            valid_results.append((client, new_fit_res))
+            if fit_res.num_examples > 0:
+                new_fit_res = FitRes(
+                    status=fit_res.status,
+                    parameters=ndarrays_to_parameters(weights),
+                    num_examples=fit_res.num_examples,
+                    metrics=fit_res.metrics,
+                )
+                valid_results.append((client, new_fit_res))
+            else:
+                failure_reason = fit_res.metrics.get("status", "UNKNOWN_ERROR")
+                print(f"🚨 Edge-{edge_name} failed! Reason: {failure_reason}")
         
         # --- STANDARD AGGREGATION (Weights Only) ---
         aggregated_parameters = super().aggregate_fit(rnd, valid_results, failures)
-
-
-        if aggregated_parameters is not None and results:
-
-            # Average across all groups (edges)
-            global_avg_grad = {}
-            if group_grads:
-                all_grads = list(group_grads.values())
-                for name in self.grad_names:
-                # for name in group_grads[0]:
-                    global_avg_grad[name] = np.mean([gg[name] for gg in all_grads], axis=0)
-
-                # Convert global_avg_grad to lists (JSON-safe)
-                global_avg_grad_serializable = {name: grad.tolist() for name, grad in global_avg_grad.items()}
-
-                # Compute yi for each group: yi_j = global_avg_grad - group_avg_grad_j
-                yi_per_group = {}
-                # for client, group_grad in zip(clients_list, group_grads):
-                # for (client, _), group_grad in zip(results, group_grads):
-                for c_name, g_grad in group_grads.items():
-                    # client_id = getattr(client, "cid", None)
-                    # old yi
-                    yi_per_group[c_name] = {name: (global_avg_grad[name] - g_grad[name]).tolist()
-                                            for name in g_grad}
-
-                # Save yi for next round
-                self.yi_per_group = yi_per_group
-                self.global_avg_grad = global_avg_grad_serializable
-
-                print(f"[Central Server] Computed yi for {len(yi_per_group)} groups.")
 
         return aggregated_parameters
 
     def configure_fit(self, server_round, parameters, client_manager, **kwargs):
         """
-        Configure per-client fit instructions with yi.
+        Prepares and sends the new Global Model (and configuration) down to the Edge Servers.
+        
+        Functionality:
+        1. Uses standard FedAvg sampling to select which Edge Servers participate in this round.
+        2. Applies FedMut (Federated Mutation) if enabled, generating diverse variations 
+           of the global model to send to different edges to increase exploration.
+        3. Calculates the exact size in bytes of the downlink payload.
+        4. Logs the Downlink traffic metrics to the dashboard/CSV.
+        5. Packages the Global Model (or mutated models) and configurations into FitIns 
+           objects and dispatches them to the Edge Servers to start the new round.
         """
         # Get default instructions from FedAvg
         fit_instructions = super().configure_fit(
@@ -214,13 +197,10 @@ class FedAvgWithGradientCorrection(fl.server.strategy.FedAvg):
             c_name = "unknown"
             try:
                 res = client.get_properties(GetPropertiesIns(config={}), timeout=10.0, group_id=0)
-                c_name = res.properties["client_name"]
+                c_name = res.properties.get("client_name", "unknown")
             except:
-                pass
+                print(f"[Central] Could not query name for client {i}")
             cfg = fit_ins.config.copy()  # make a copy
-
-            # Get client_id from config or ClientProxy
-            cid = cfg.get("cid", getattr(client, "cid", None))
 
             # A. FedMut Logic: Assign specific mutated model
             if use_mutation:
@@ -230,74 +210,20 @@ class FedAvgWithGradientCorrection(fl.server.strategy.FedAvg):
                 # Use standard global model
                 client_parameters = fit_ins.parameters
 
-            default_yi = {
-                name: np.zeros(shape) 
-                for name, shape in self.grad_shapes.items()
-            }
-
-            # Fetch yi from yi_per_group
-            # yi = self.yi_per_group.get(cid, default_yi)
-            yi = self.yi_per_group.get(c_name, {})
-            yi_blob = b""
-            yi_is_compressed = False
-
             # --- Metrics Logic ---
             # A. Model Size
             model_payload = parameters_to_ndarrays(fit_ins.parameters)
             model_u = get_payload_size(model_payload)
             model_c = model_u # No compression on model weights
 
-            # B. Yi Size & Compression Time
-            yi_u = get_payload_size(yi)
-            yi_c = yi_u
-            comp_time = 0.0
-
-            if COMPRESSION_METHOD != "none" and COMPRESS_YI and yi:
-                # 1. Convert to dict for maintaining key names(layer names)
-                yi_dict_to_send = {}
-
-                for k in self.grad_names:
-                    if k in yi:
-                        val = yi[k]
-                        if isinstance(val, list):
-                            val = np.array(val)
-                        yi_dict_to_send[k] = val
-
-                comp_start = time.time()
-                # 2. Compress & Pack
-                compressed_yi = compress_model_update(yi_dict_to_send)
-                yi_array = pack_compressed_data(compressed_yi)
-                yi_blob = yi_array.tobytes() 
-                comp_time = time.time() - comp_start
-                yi_c = get_payload_size(yi_blob)
-                yi_is_compressed = True
-
-                # # 3. Append to parameters (Weights + Blob)
-                # client_weights = parameters_to_ndarrays(fit_ins.parameters)
-                # full_payload = client_weights + [yi_blob]
-
-                # client_parameters = ndarrays_to_parameters(full_payload)
-                # cfg["yi_compressed"] = True # Flag for Edge Server to decompress
-
-            else:
-                # Fallback (Existing logic)
-                # yi_serializable = {k: v.tolist() if isinstance(v, np.ndarray) else v for k, v in yi.items()}
-                # # cfg["yi"] = json.dumps(yi_serializable)
-                # cfg["yi"] = pickle.dumps(yi_serializable)
-                # client_parameters = fit_ins.parameters
-                yi_blob = pickle.dumps(yi)
-                yi_is_compressed = False
-            
-            cfg["yi"] = yi_blob
-            cfg["yi_compressed"] = yi_is_compressed
             target_id = c_name if c_name != "unknown" else f"Edge_Index_{i}"
             # --- Log Traffic Metrics ---
             metrics = get_traffic_metrics(
             round_num=server_round,
             direction=f"Downlink_to_{target_id}",
                 model_tuple=(model_u, model_c),
-                yi_tuple=(yi_u, yi_c),
-                comp_time=comp_time 
+                yi_tuple=(0, 0),
+                comp_time=0.0 
             )
             self.traffic_logger.log(metrics)
 
@@ -309,6 +235,18 @@ class FedAvgWithGradientCorrection(fl.server.strategy.FedAvg):
         return new_fit_instructions
 
     def evaluate(self, server_round, parameters):
+        """
+        Performs Centralized Evaluation of the aggregated Global Model.
+        
+        Functionality:
+        1. Skips evaluation on round 0 (initialization).
+        2. Safety Check: Verifies that the aggregated parameters are not all zeros 
+           (which would indicate a total aggregation failure).
+        3. Loads a fresh instance of the model and injects the new Global Weights.
+        4. Loads the global test dataset and runs a full test pass to determine 
+           the true global loss and accuracy.
+        5. Logs the metrics to the local logger and the external Dashboard (if enabled).
+        """
         if server_round == 0:
             print("Skipping evaluation for round 0")
             return super().evaluate(server_round, parameters)
@@ -355,8 +293,16 @@ class FedAvgWithGradientCorrection(fl.server.strategy.FedAvg):
         return float(loss), {"accuracy": float(accuracy)}
 
     def aggregate_evaluate(self, server_round, results, failures):
-        """Log loss values after each round."""
-
+        """
+        Aggregates distributed evaluation metrics returned by the Edge Servers.
+        
+        Functionality:
+        1. Collects the local evaluation results (loss and accuracy) computed by the Edge Servers.
+        2. Uses the standard FedAvg logic to compute a weighted average of the loss.
+        3. Manually computes a weighted average of the accuracies based on the number 
+           of examples (num_examples) each Edge Server represents.
+        4. Prints and returns the aggregated metrics for the current round.
+        """
         if not results:
             return None, {}
 
