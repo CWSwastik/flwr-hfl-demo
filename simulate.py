@@ -48,43 +48,67 @@ def get_free_port():
         return s.getsockname()[1]
 
 
-def print_system_resources():
-    """Prints available CPU, GPU, and RAM resources."""
+
+def check_resources_and_get_gpus():
+    """
+    Spawns an isolated probe to check CPU/GPU resources without 
+    importing PyTorch into the main simulate.py process.
+    """
     print("\n" + "="*60)
-    print("🖥️  SYSTEM RESOURCES CHECK")
+    print("🖥️  SYSTEM RESOURCES CHECK (PROBE MODE)")
     print("="*60)
 
-    # 1. GPU Info
+    # 1. The Isolated Probe Script
+    probe_script = """
+import torch
+import json
+info = {
+    'gpu_count': torch.cuda.device_count() if torch.cuda.is_available() else 0,
+    'torch_threads': torch.get_num_threads() if torch.cuda.is_available() else "N/A",
+    'gpus': []
+}
+if info['gpu_count'] > 0:
+    for i in range(info['gpu_count']):
+        try:
+            mem = torch.cuda.mem_get_info(i)
+            info['gpus'].append({
+                'name': torch.cuda.get_device_name(i),
+                'free': mem[0] / (1024**3),
+                'total': mem[1] / (1024**3)
+            })
+        except:
+            info['gpus'].append({'name': torch.cuda.get_device_name(i), 'free': 0, 'total': 0})
+print(json.dumps(info))
+"""
+    
+    # 2. Execute the Probe
     try:
-        gpu_count = torch.cuda.device_count()
-        print(f"GPUs available: {gpu_count}")
-        if gpu_count > 0:
-            for i in range(gpu_count):
-                gpu_name = torch.cuda.get_device_name(i)
-                # Check memory of each GPU
-                try:
-                    mem_info = torch.cuda.mem_get_info(i)
-                    free_mem = mem_info[0] / (1024**3)
-                    total_mem = mem_info[1] / (1024**3)
-                    print(f"  [{i}] {gpu_name} | Mem: {free_mem:.2f}/{total_mem:.2f} GB Free")
-                except:
-                    print(f"  [{i}] {gpu_name}")
-        else:
-            print("  No GPUs detected. Training will run on CPU.")
+        result = subprocess.run(
+            ['python', '-c', probe_script],
+            capture_output=True, text=True, check=True
+        )
+        hw_info = json.loads(result.stdout.strip())
     except Exception as e:
-        print(f"  ⚠️ GPU Check Error: {e}")
+        print(f"  ⚠️ Hardware Probe Failed. Error: {e}")
+        hw_info = {'gpu_count': 0, 'torch_threads': 'Unknown', 'gpus': []}
 
-    # 2. CPU Info
+    # 3. Print GPU Info
+    print(f"GPUs available: {hw_info['gpu_count']}")
+    for i, gpu in enumerate(hw_info['gpus']):
+        print(f"  [{i}] {gpu['name']} | Mem: {gpu['free']:.2f}/{gpu['total']:.2f} GB Free")
+    if hw_info['gpu_count'] == 0:
+        print("  No GPUs detected. Training will run on CPU.")
+
+    # 4. Print CPU Info
     try:
         total_cpus = os.cpu_count()
-        pytorch_threads = torch.get_num_threads()
         print(f"\nCPUs:")
         print(f"  Total Logical Cores: {total_cpus}")
-        print(f"  PyTorch Threads:     {pytorch_threads}")
+        print(f"  PyTorch Threads:     {hw_info['torch_threads']}")
     except Exception as e:
         print(f"  ⚠️ CPU Check Error: {e}")
 
-    # 3. RAM Info
+    # 5. Print RAM Info
     try:
         mem = psutil.virtual_memory()
         total_ram = mem.total / (1024 ** 3)
@@ -98,11 +122,12 @@ def print_system_resources():
         
         if available_ram < 2.0:
             print("\n  ⚠️ WARNING: Low System RAM available (<2GB). Experiments might crash.")
-            
     except Exception as e:
-        print(f"  ⚠️ RAM Check Error (install psutil?): {e}")
+        print(f"  ⚠️ RAM Check Error: {e}")
 
     print("="*60 + "\n")
+    
+    return hw_info['gpu_count']
 
 
 def create_experiment_on_dashboard(topology):
@@ -202,8 +227,14 @@ def print_topology_summary(edge_client_counts, client_assignments, edge_configs,
     print("="*80 + "\n")
 
 def spawn_processes():
-    # --- STEP 0: CHECK RESOURCES ---
-    print_system_resources()
+    # --- STEP 0: CHECK RESOURCES and GPU BALANCING SETUP ---
+    try:
+        # num_gpus = torch.cuda.device_count()
+        num_gpus = check_resources_and_get_gpus()
+        print(f"🎮 Detected {num_gpus} GPUs available for load balancing.")
+    except:
+        num_gpus = 0
+        print("⚠️  No GPUs detected. Running on CPU.")
 
     topo_file = get_abs_path(f"topologies/{TOPOLOGY_FILE}")
     if not os.path.exists(topo_file):
@@ -329,17 +360,9 @@ def spawn_processes():
     print("🚀 Spawning processes in 3 seconds...")
     time.sleep(3)
 
-    # --- STEP 5: GPU BALANCING SETUP ---
-    try:
-        num_gpus = torch.cuda.device_count()
-        print(f"🎮 Detected {num_gpus} GPUs available for load balancing.")
-    except:
-        num_gpus = 0
-        print("⚠️  No GPUs detected. Running on CPU.")
-
     gpu_iterator = 0  # Round-robin counter
 
-    # --- STEP 6: SPAWN ---
+    # --- STEP 5: SPAWN ---
     current_os = platform.system()
     if config.ENABLE_DASHBOARD:
         create_experiment_on_dashboard(topology)
