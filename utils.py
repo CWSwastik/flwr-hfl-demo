@@ -199,6 +199,7 @@ def train_with_zi_yi(net, trainloader, optimizer, epochs, beta, zi, yi, verbose=
                         # apply correction to the actual gradient used in optimizer.step()
                         p.grad.add_(beta * (zi_t + yi_t))       
 
+            torch.nn.utils.clip_grad_norm_(net.parameters(), max_norm=10) # added as per official implementation
             optimizer.step()
             num_batches += 1
 
@@ -271,6 +272,7 @@ def train_fedprox_with_zi_yi(net, trainloader, optimizer: torch.optim.Adam, epoc
                         p.grad.add_(beta * (zi_t + yi_t))
                         grad_accumulator[name].add_(p.grad)
 
+            torch.nn.utils.clip_grad_norm_(net.parameters(), max_norm=10) # added as per official implementation
             optimizer.step()
             num_batches += 1
             # Metrics

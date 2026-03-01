@@ -481,16 +481,27 @@ def run_edge_as_client(shared_state):
                         # Helper to map list -> dict
                         model_module = importlib.import_module(f"models.{MODEL}")
                         ref_net = model_module.Net()
-                        param_keys = [n for n, p in ref_net.named_parameters()]
+                        # [MTGC Bug 3 FIX] get_parameters() returns full state_dict (including
+                        # BatchNorm buffers: running_mean, running_var, num_batches_tracked).
+                        # named_parameters() returns ONLY trainable params — fewer entries.
+                        # OLD: zip(named_param_keys, full_state_dict_array) → wrong name->array mapping
+                        # OLD: param_keys = [n for n, p in ref_net.named_parameters()]
+                        # OLD: global_weights_dict = dict(zip(param_keys, parameters))
+                        # param_keys = [n for n, p in ref_net.named_parameters()]
+                        param_keys = list(ref_net.state_dict().keys())
                         
                         global_weights_dict = dict(zip(param_keys, parameters))
+                        # Only trainable param names are used for the y_j update (not BN buffers)
+                        trainable_names = [n for n, _ in ref_net.named_parameters()]
 
                         # Init Yj if first update
                         if not self.yj:
-                            self.yj = {k: np.zeros_like(v) for k,v in self.prev_group_model.items()}
+                            # self.yj = {k: np.zeros_like(v) for k,v in self.prev_group_model.items()}
+                            self.yj = {k: np.zeros_like(global_weights_dict[k]) for k in trainable_names}
 
                         # Update Loop
-                        for name in self.yj:
+                        # for name in self.yj:
+                        for name in trainable_names:
                             if name in self.prev_group_model and name in global_weights_dict:
                                 # Drift = Previous Group Model - New Global Model
                                 drift = self.prev_group_model[name] - global_weights_dict[name]
@@ -522,9 +533,18 @@ def run_edge_as_client(shared_state):
                         # 1. Save History for NEXT round's drift calculation
                         model_module = importlib.import_module(f"models.{MODEL}")
                         ref_net = model_module.Net()
-                        param_keys = [n for n, p in ref_net.named_parameters()]
+                        # param_keys = [n for n, p in ref_net.named_parameters()]
                         
-                        self.prev_group_model = dict(zip(param_keys, edge_weights))
+                        # self.prev_group_model = dict(zip(param_keys, edge_weights))
+                        # [MTGC Bug 3 FIX] get_parameters() returns full state_dict (including
+                        # BatchNorm buffers: running_mean, running_var, num_batches_tracked).
+                        # named_parameters() returns ONLY trainable params — fewer entries.
+                        # OLD: zip(named_param_keys, full_state_dict_array) → wrong name->array mapping
+                        # OLD: param_keys = [n for n, p in ref_net.named_parameters()]
+                        # OLD: global_weights_dict = dict(zip(param_keys, parameters))
+                        all_state_keys = list(ref_net.state_dict().keys())
+                        self.prev_group_model = dict(zip(all_state_keys, edge_weights))
+                        
                         self.prev_H_edge = self.shared_state.get("H_edge", 1.0)
                         self.prev_lr_edge = self.shared_state.get("lr_edge", 0.01)
                         

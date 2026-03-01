@@ -229,6 +229,12 @@ class FlowerClient(fl.client.NumPyClient):
 
             # --- Gradient Correction Setup ---
             device = next(self.net.parameters()).device
+            # zi is reset everyround as per mtgc git repo https://github.com/wenzhifang/MTGC/blob/main/MTGC_Implementation/utils_methods.py
+            # Official code (utils_methods.py train_MTGC, line ~99):
+            #   for t in range(com_amount):
+            #       Z_state_param_list = np.zeros((n_clnt, n_par))  <-- reset every round
+            for name in self.zi:
+                self.zi[name].zero_()
             zi = {k: torch.as_tensor(v, dtype=torch.float32, device=device) for k, v in self.zi.items()}
             yi = {k: torch.as_tensor(v, dtype=torch.float32, device=device) for k, v in yi.items()}
 
@@ -257,11 +263,11 @@ class FlowerClient(fl.client.NumPyClient):
                 )
             
             # Step the scheduler
-            self.scheduler.step()
+            # self.scheduler.step()
             current_lr = self.optimizer.param_groups[0]["lr"]
 
             # Cache state for next round's math
-            if beta == 1.0:
+            if beta != 0:
                 self.prev_local_weights = {
                     name: p.detach().clone().cpu() 
                     for name, p in self.net.named_parameters()
