@@ -199,7 +199,7 @@ class EdgeStrategy(fl.server.strategy.FedAvg):
             # Store safely in shared_state
             # print(zi_per_client, avg_grad_serializable)
             self.shared_state["zi_per_client"] = zi_per_client
-            self.shared_state["group_avg_grad"] = pickle.dumps(avg_grad)
+            self.shared_state["group_avg_grad"] = pickle.dumps(avg_grad, protocol=pickle.HIGHEST_PROTOCOL)
             
             print(f"[Edge Server] Computed zi for {len(zi_per_client)} clients.")
             print(f"[Edge Server] Aggregated model at round {rnd}, global round {current_global_round}.")
@@ -380,7 +380,7 @@ class EdgeStrategy(fl.server.strategy.FedAvg):
                     zi_is_compressed = True
                 else:
                     # No compression
-                    zi_blob = pickle.dumps(client_zi)
+                    zi_blob = pickle.dumps(client_zi, protocol=pickle.HIGHEST_PROTOCOL)
                     zi_is_compressed = False
             
             cfg = fit_ins.config.copy()

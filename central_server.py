@@ -155,22 +155,16 @@ class FedAvgWithGradientCorrection(fl.server.strategy.FedAvg):
                 # for name in group_grads[0]:
                     global_avg_grad[name] = np.mean([gg[name] for gg in all_grads], axis=0)
 
-                # Convert global_avg_grad to lists (JSON-safe)
-                global_avg_grad_serializable = {name: grad.tolist() for name, grad in global_avg_grad.items()}
-
                 # Compute yi for each group: yi_j = global_avg_grad - group_avg_grad_j
+                # Keep ndarrays (no .tolist()): pickle handles them natively with protocol 5,
+                # ~10x smaller payload and avoids materializing huge nested Python list trees.
                 yi_per_group = {}
-                # for client, group_grad in zip(clients_list, group_grads):
-                # for (client, _), group_grad in zip(results, group_grads):
                 for c_name, g_grad in group_grads.items():
-                    # client_id = getattr(client, "cid", None)
-                    # old yi
-                    yi_per_group[c_name] = {name: (global_avg_grad[name] - g_grad[name]).tolist()
+                    yi_per_group[c_name] = {name: (global_avg_grad[name] - g_grad[name])
                                             for name in g_grad}
 
                 # Save yi for next round
                 self.yi_per_group = yi_per_group
-                self.global_avg_grad = global_avg_grad_serializable
 
                 print(f"[Central Server] Computed yi for {len(yi_per_group)} groups.")
 
@@ -280,12 +274,7 @@ class FedAvgWithGradientCorrection(fl.server.strategy.FedAvg):
                 # cfg["yi_compressed"] = True # Flag for Edge Server to decompress
 
             else:
-                # Fallback (Existing logic)
-                # yi_serializable = {k: v.tolist() if isinstance(v, np.ndarray) else v for k, v in yi.items()}
-                # # cfg["yi"] = json.dumps(yi_serializable)
-                # cfg["yi"] = pickle.dumps(yi_serializable)
-                # client_parameters = fit_ins.parameters
-                yi_blob = pickle.dumps(yi)
+                yi_blob = pickle.dumps(yi, protocol=pickle.HIGHEST_PROTOCOL)
                 yi_is_compressed = False
             
             cfg["yi"] = yi_blob

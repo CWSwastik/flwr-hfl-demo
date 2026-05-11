@@ -641,7 +641,7 @@ def get_payload_size(payload):
 
 def pack_compressed_data(compressed_dict: dict) -> np.ndarray:
     """Serializes compressed dict to a uint8 numpy array for transport."""
-    serialized = pickle.dumps(compressed_dict)
+    serialized = pickle.dumps(compressed_dict, protocol=pickle.HIGHEST_PROTOCOL)
     # Convert bytes to uint8 array
     return np.frombuffer(serialized, dtype=np.uint8)
 
