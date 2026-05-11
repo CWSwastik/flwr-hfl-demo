@@ -369,6 +369,13 @@ def spawn_processes():
     
     order = {"server": 0, "edge": 1, "client": 2}
     sorted_topo = dict(sorted(topology.items(), key=lambda item: order.get(item[1].get("kind"), 99)))
+    
+    log_dir = get_abs_path(f"logs/{config.EXPERIMENT_NAME}")
+    os.makedirs(log_dir, exist_ok=True)
+    
+    error_log_path = os.path.join(log_dir, "error_logs.log")
+    print(f"Errors will be silently logged to: {error_log_path}")
+    error_file = open(error_log_path, "a")
 
     if current_os == "Windows":
         commands = []
@@ -418,6 +425,7 @@ def spawn_processes():
 
     elif current_os == "Linux":
         procs = []
+        
         for name, cfg in sorted_topo.items():
             kind = cfg.get("kind")
             
@@ -453,7 +461,7 @@ def spawn_processes():
             else:
                 continue
 
-            proc = subprocess.Popen(cmd, shell=True, env=process_env)
+            proc = subprocess.Popen(cmd, shell=True, env=process_env, stderr=error_file)
             procs.append((name, proc))
             print(f"Starting process {name} with command: {cmd}")
             if kind == "server":

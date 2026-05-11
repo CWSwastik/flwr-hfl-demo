@@ -158,7 +158,26 @@ class EdgeStrategy(fl.server.strategy.FedAvg):
         self.shared_state["lr_edge"] = (lr_weighted_sum / weight_sum) if weight_sum > 0 else None
 
         # --- Call Super (Weights Aggregation) ---
-        aggregated_parameters = super().aggregate_fit(rnd, valid_results, failures)
+        # aggregated_parameters = super().aggregate_fit(rnd, valid_results, failures)
+        # --- UNWEIGHTED aggregation (matching official MTGC code) ---
+        weights_results = []
+        for client, fit_res in valid_results:
+            params = parameters_to_ndarrays(fit_res.parameters)
+            weights_results.append(params)
+        
+        # Unweighted mean: each client contributes equally
+        num_clients = len(weights_results)
+        aggregated_ndarrays = [
+            np.mean(np.array([w[i] for w in weights_results]), axis=0)
+            for i in range(len(weights_results[0]))
+        ]
+        
+        aggregated_params = ndarrays_to_parameters(aggregated_ndarrays)
+        self.shared_state["aggregated_model"] = aggregated_params
+        self.shared_state["num_examples"] = sum(r.num_examples for _, r in valid_results)
+        
+        # Return in the format FedAvg expects: (Parameters, {metrics})
+        return aggregated_params, {}
         
         if aggregated_parameters is not None:
             self.shared_state["aggregated_model"] = aggregated_parameters[0]

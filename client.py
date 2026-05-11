@@ -203,7 +203,14 @@ class FlowerClient(fl.client.NumPyClient):
                     except:
                         return {}
 
+            if yi_blob:
+                print(f"[{args.name}] yi_blob len={len(yi_blob)}")
             yi = decode_cv(yi_blob)
+            if yi:
+                sk = next(iter(yi.values()))
+                print(f"[{args.name}] yi has {len(yi)} keys, norm={np.linalg.norm(np.array(sk) if not isinstance(sk, np.ndarray) else sk):.6f}")
+            else:
+                print(f"[{args.name}] ⚠️ yi EMPTY after decode!")
             beta = config.get("beta", GRADIENT_CORRECTION_BETA)
             local_epochs = config.get("local_epochs", LOCAL_EPOCHS)
 
@@ -233,8 +240,9 @@ class FlowerClient(fl.client.NumPyClient):
             # Official code (utils_methods.py train_MTGC, line ~99):
             #   for t in range(com_amount):
             #       Z_state_param_list = np.zeros((n_clnt, n_par))  <-- reset every round
-            for name in self.zi:
-                self.zi[name].zero_()
+            # for name in self.zi:
+            #     self.zi[name].zero_()
+            zi = {}
             zi = {k: torch.as_tensor(v, dtype=torch.float32, device=device) for k, v in self.zi.items()}
             yi = {k: torch.as_tensor(v, dtype=torch.float32, device=device) for k, v in yi.items()}
 

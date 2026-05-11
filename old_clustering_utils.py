@@ -1,0 +1,386 @@
+# clustering_utils.py
+# Utility functions for clustering clients in Hierarchical FL based on label distribution
+
+import yaml
+import numpy as np
+from scipy.stats import wasserstein_distance
+from scipy.spatial.distance import jensenshannon
+from scipy.cluster.hierarchy import linkage, fcluster, leaves_list
+from collections import defaultdict
+import pandas as pd
+import os
+from config import NUM_CLIENTS, NUM_CLASSES, EXPERIMENT_NAME, TOPOLOGY_FILE
+from utils import load_datasets, get_dataloader_summary
+
+
+def parse_topology_for_clustering(topology_file_path):
+    """
+    Reads the topology YAML file and extracts:
+    1. Edge server to clients mapping
+    2. Number of edge servers
+    3. Client information with their partition IDs
+    
+    Args:
+        topology_file_path: Path to the topology YAML file
+    
+    Returns:
+        dict: {
+            'num_edge_servers': int,
+            'edge_to_clients': {edge_name: [client_names]},
+            'client_info': {client_name: {'partition_id': int, 'edge_server': str}},
+            'central_server': str,
+            'pid_to_clientname': {partition_id: client_name}
+        }
+    """
+    with open(topology_file_path, 'r') as f:
+        topology = yaml.safe_load(f)
+    
+    edge_to_clients = defaultdict(list)
+    client_info = {}
+    central_server = None
+    edge_servers = []
+    pid_to_clientname = {}
+    
+    # First pass: identify central server and edge servers
+    for name, cfg in topology.items():
+        if cfg.get('kind') == 'server':
+            central_server = name
+        elif cfg.get('kind') == 'edge':
+            edge_servers.append(name)
+    
+    # Second pass: map clients to edge servers
+    for name, cfg in topology.items():
+        if cfg.get('kind') == 'client':
+            partition_id = cfg.get('partition_id')
+            host_ref = cfg.get('host')
+            host_port = cfg.get('port')
+            
+            # Find which edge server this client connects to
+            if host_ref in topology and topology[host_ref].get('kind') == 'edge':
+                edge_server = host_ref
+            elif host_ref in topology and topology[host_ref].get('kind') == 'server':
+                # Direct connection to central server (no edge)
+                edge_server = 'central'
+            else:
+                edge_server = 'unknown'
+            
+            edge_to_clients[edge_server].append(name)
+            client_info[name] = {
+                'partition_id': partition_id,
+                'edge_server': edge_server,
+                'host_ref': host_ref,
+                'host_port': host_port
+            }
+            if partition_id is not None:
+                pid_to_clientname[int(partition_id)] = name
+    
+    num_edge_servers = len(edge_servers)
+    
+    result = {
+        'num_edge_servers': num_edge_servers,
+        'edge_servers': edge_servers,
+        'edge_to_clients': dict(edge_to_clients),
+        'client_info': client_info,
+        'central_server': central_server,
+        'pid_to_clientname': pid_to_clientname
+    }
+    
+    print(f"\n📊 Topology Analysis:")
+    print(f"  Central Server: {central_server}")
+    print(f"  Number of Edge Servers: {num_edge_servers}")
+    print(f"  Edge Servers: {edge_servers}")
+    for edge, clients in edge_to_clients.items():
+        print(f"    {edge}: {len(clients)} clients")
+    
+    return result
+
+
+def cluster_clients_by_distribution(num_clusters, distance_metric='emd', save_dir=None, topology_info=None):
+    """
+    Clusters clients based on their label distribution using EMD or JSD.
+    Updates client partition IDs based on clustering results so that clients
+    within the same cluster have similar label distributions.
+    
+    Args:
+        num_clusters: Number of clusters (typically number of edge servers)
+        distance_metric: 'emd' for Earth Mover's Distance or 'jsd' for Jensen-Shannon Divergence
+        save_dir: Directory to save CSV files (if None, uses logs/{EXPERIMENT_NAME})
+    
+    Returns:
+        dict: {
+            'partition_mapping': {logical_id: assigned_id},
+            'cluster_assignments': {logical_id: cluster_id},
+            'client_distributions_pre': DataFrame,
+            'client_distributions_post': DataFrame,
+            'cluster_distributions': DataFrame,
+            'distance_matrix': ndarray,
+            'linkage_matrix': ndarray
+        }
+    """
+    print(f"\n🔄 Starting client clustering with {num_clusters} clusters using {distance_metric.upper()}...")
+    
+    # Step 1: Load all client data distributions
+    print(f"📦 Loading distributions for {NUM_CLIENTS} clients...")
+    partition_data = []
+    pid_to_clientname = {}
+    if topology_info is not None:
+        pid_to_clientname = topology_info.get('pid_to_clientname', {})
+    
+    for pid in range(NUM_CLIENTS):
+        trainloader, _, _ = load_datasets(partition_id=pid)
+        summary = get_dataloader_summary(trainloader)
+        dist_counts_map = summary['label_distribution']
+        num_items = summary['num_items']
+        
+        # Create counts vector
+        counts_vector = np.zeros(NUM_CLASSES)
+        if num_items > 0:
+            for label_str, count in dist_counts_map.items():
+                label_int = int(label_str)
+                if 0 <= label_int < NUM_CLASSES:
+                    counts_vector[label_int] = count
+        
+        # Store both counts and normalized distribution
+        distribution = counts_vector / num_items if num_items > 0 else counts_vector
+        
+        partition_data.append({
+            'pid': pid,
+            'counts': counts_vector,
+            'distribution': distribution,
+            'total': num_items
+        })
+        
+        if (pid + 1) % 10 == 0 or pid == NUM_CLIENTS - 1:
+            print(f"  Loaded {pid + 1}/{NUM_CLIENTS} partitions...")
+    
+    # Step 2: Calculate pairwise distance matrix
+    print(f"\n📏 Calculating pairwise distances using {distance_metric.upper()}...")
+    n = NUM_CLIENTS
+    dist_matrix = np.zeros((n, n))
+    
+    if distance_metric == 'emd':
+        # EMD using Wasserstein distance (1D Earth Mover's Distance)
+        class_indices = np.arange(NUM_CLASSES)
+        for i in range(n):
+            for j in range(i + 1, n):
+                dist = wasserstein_distance(
+                    class_indices, class_indices,
+                    partition_data[i]['distribution'],
+                    partition_data[j]['distribution']
+                )
+                dist_matrix[i, j] = dist
+                dist_matrix[j, i] = dist
+    
+    elif distance_metric == 'jsd':
+        # Jensen-Shannon Divergence
+        for i in range(n):
+            for j in range(i + 1, n):
+                # Add small epsilon to avoid log(0)
+                p = partition_data[i]['distribution'] + 1e-10
+                q = partition_data[j]['distribution'] + 1e-10
+                dist = jensenshannon(p, q)
+                dist_matrix[i, j] = dist
+                dist_matrix[j, i] = dist
+    
+    else:
+        raise ValueError(f"Unknown distance metric: {distance_metric}")
+    
+    print(f"  Distance matrix shape: {dist_matrix.shape}")
+    print(f"  Distance range: [{dist_matrix[dist_matrix > 0].min():.4f}, {dist_matrix.max():.4f}]")
+    
+    # Step 3: Perform hierarchical clustering
+    print(f"\n🌳 Performing hierarchical clustering...")
+    condensed_dist_matrix = dist_matrix[np.triu_indices(n, k=1)]
+    linkage_matrix = linkage(condensed_dist_matrix, method='average')
+
+    # reorder of the list
+    ordered_leaves = leaves_list(linkage_matrix)
+    print(f"  Ordered leaves: {ordered_leaves}")
+    print(f"  Linkage matrix shape: {linkage_matrix.shape}")
+    
+    # Cut the dendrogram to get desired number of clusters
+    cluster_labels = fcluster(linkage_matrix, num_clusters, criterion='maxclust')
+    
+    # Step 4: Assign clients to clusters based on similarity
+    # Group clients by cluster
+    clusters = defaultdict(list)
+    for pid, cluster_id in enumerate(cluster_labels):
+        clusters[cluster_id].append(pid)
+    
+    print(f"\n📊 Cluster assignments:")
+    for cluster_id in sorted(clusters.keys()):
+        clients = clusters[cluster_id]
+        print(f"  Cluster {cluster_id}: {len(clients)} clients - {clients[:10]}{'...' if len(clients) > 10 else ''}")
+    
+    # Step 5: Create partition mapping
+    # Rearrange clients so those in the same cluster are contiguous
+    # This ensures clients under the same edge server have similar distributions
+    partition_mapping = {}
+    cluster_assignments = {}
+    new_pid = 0
+    
+    for cluster_id in sorted(clusters.keys()):
+        client_pids = sorted(clusters[cluster_id])
+        for original_pid in client_pids:
+            partition_mapping[new_pid] = original_pid
+            cluster_assignments[new_pid] = cluster_id
+            new_pid += 1
+    
+    # Step 6: Prepare DataFrames for saving
+    # Pre-clustering: original assignments (1-to-1 mapping)
+    pre_cluster_rows = []
+    for pid in range(NUM_CLIENTS):
+        client_name = pid_to_clientname.get(pid, f"Client-{pid}")
+        row = {
+            'ClientName': client_name,
+            'PartitionID': pid,
+            'TotalSamples': int(partition_data[pid]['total']),
+        }
+        for class_idx in range(NUM_CLASSES):
+            row[f'Class_{class_idx}'] = int(partition_data[pid]['counts'][class_idx])
+        pre_cluster_rows.append(row)
+    
+    df_pre = pd.DataFrame(pre_cluster_rows)
+    
+    # Post-clustering: new assignments based on clustering
+    post_cluster_rows = []
+    for logical_id in range(NUM_CLIENTS):
+        assigned_id = partition_mapping[logical_id]
+        cluster_id = cluster_assignments[logical_id]
+        
+        client_name = pid_to_clientname.get(logical_id, f"Client-{logical_id}")
+        physical_client_name = pid_to_clientname.get(assigned_id, f"Client-{assigned_id}")
+
+        row = {
+            'ClientName': client_name,          # from topology (e.g., Client-1)
+            'LogicalPartitionID': logical_id,
+            'AssignedPartitionID': assigned_id,
+            'ClusterID': cluster_id,
+            'TotalSamples': int(partition_data[assigned_id]['total']),
+        }
+        for class_idx in range(NUM_CLASSES):
+            row[f'Class_{class_idx}'] = int(partition_data[assigned_id]['counts'][class_idx])
+        post_cluster_rows.append(row)
+    
+    df_post = pd.DataFrame(post_cluster_rows)
+    
+    # Cluster-level aggregated distribution
+    cluster_aggregate_rows = []
+    for cluster_id in sorted(clusters.keys()):
+        cluster_counts = np.zeros(NUM_CLASSES)
+        total_samples = 0
+        member_clients = []
+        
+        for logical_id in range(NUM_CLIENTS):
+            if cluster_assignments[logical_id] == cluster_id:
+                assigned_id = partition_mapping[logical_id]
+                cluster_counts += partition_data[assigned_id]['counts']
+                total_samples += partition_data[assigned_id]['total']
+                member_clients.append(logical_id)
+        
+        row = {
+            'ClusterID': cluster_id,
+            'NumClients': len(member_clients),
+            'ClientIDs': str(member_clients),
+            'TotalSamples': int(total_samples)
+        }
+        for class_idx in range(NUM_CLASSES):
+            row[f'Class_{class_idx}'] = int(cluster_counts[class_idx])
+        cluster_aggregate_rows.append(row)
+    
+    df_cluster = pd.DataFrame(cluster_aggregate_rows)
+    
+    # Step 7: Save CSVs
+    if save_dir is None:
+        save_dir = os.path.join('logs', EXPERIMENT_NAME)
+    
+    os.makedirs(save_dir, exist_ok=True)
+    
+    pre_csv = os.path.join(save_dir, 'client_distribution_pre_clustering.csv')
+    post_csv = os.path.join(save_dir, 'client_distribution_post_clustering.csv')
+    cluster_csv = os.path.join(save_dir, 'cluster_distribution.csv')
+    
+    df_pre.to_csv(pre_csv, index=False)
+    df_post.to_csv(post_csv, index=False)
+    df_cluster.to_csv(cluster_csv, index=False)
+    
+    print(f"\n✅ Saved distribution CSVs:")
+    print(f"  📄 {pre_csv}")
+    print(f"  📄 {post_csv}")
+    print(f"  📄 {cluster_csv}")
+    
+    return {
+        'partition_mapping': partition_mapping,
+        'cluster_assignments': cluster_assignments,
+        'client_distributions_pre': df_pre,
+        'client_distributions_post': df_post,
+        'cluster_distributions': df_cluster,
+        'distance_matrix': dist_matrix,
+        'linkage_matrix': linkage_matrix
+    }
+
+
+def assign_clusters_to_edge_servers(topology_info, cluster_result):
+    """
+    Maps clusters to edge servers based on topology.
+    
+    Args:
+        topology_info: Result from parse_topology_for_clustering()
+        cluster_result: Result from cluster_clients_by_distribution()
+    
+    Returns:
+        dict: Mapping of edge servers to cluster IDs
+    """
+    num_edge_servers = topology_info['num_edge_servers']
+    num_clusters = len(set(cluster_result['cluster_assignments'].values()))
+    
+    if num_clusters != num_edge_servers:
+        print(f"⚠️  Warning: Number of clusters ({num_clusters}) != number of edge servers ({num_edge_servers})")
+    
+    # Simple assignment: cluster i -> edge server i
+    edge_servers = topology_info['edge_servers']
+    cluster_to_edge = {}
+    
+    for i, edge_server in enumerate(edge_servers):
+        cluster_id = i + 1  # Cluster IDs start from 1
+        cluster_to_edge[cluster_id] = edge_server
+    
+    print(f"\n🔗 Cluster to Edge Server Mapping:")
+    for cluster_id, edge_server in cluster_to_edge.items():
+        print(f"  Cluster {cluster_id} -> {edge_server}")
+    
+    return cluster_to_edge
+
+
+# Example usage and integration test
+if __name__ == "__main__":
+    print("=" * 60)
+    print("Testing Clustering Utilities for Hierarchical FL")
+    print("=" * 60)
+    
+    # Test 1: Parse topology
+    topology_file = os.path.join("topologies", TOPOLOGY_FILE)
+    if os.path.exists(topology_file):
+        print("\nTest 1: Parsing topology...")
+        topology_info = parse_topology_for_clustering(topology_file)
+        print(f"Number of edge servers: {topology_info['num_edge_servers']}")
+        
+        # Test 2: Cluster clients
+        print("\nTest 2: Clustering clients by distribution...")
+        cluster_result = cluster_clients_by_distribution(
+            num_clusters=topology_info['num_edge_servers'],
+            distance_metric='jsd',  # or 'emd' or 'none'
+            # save_dir=os.path.join(BASE_DIR, "logs", config.EXPERIMENT_NAME),
+            topology_info=topology_info,
+        )
+        
+        print("\nPartition mapping (first 5):")
+        for k, v in list(cluster_result['partition_mapping'].items())[:5]:
+            print(f"  Logical ID {k} -> Physical Partition {v}")
+        
+        # Test 3: Assign clusters to edge servers
+        print("\nTest 3: Assigning clusters to edge servers...")
+        cluster_to_edge = assign_clusters_to_edge_servers(topology_info, cluster_result)
+    else:
+        print(f"⚠️  Topology file not found: {topology_file}")
+        print("Please ensure the topology file exists in the correct location.")

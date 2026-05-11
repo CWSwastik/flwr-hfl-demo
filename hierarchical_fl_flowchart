@@ -1,0 +1,42 @@
+// Hierarchical FL
+digraph {
+	rankdir=TB splines=ortho
+	subgraph cluster_cloud {
+		label="CLOUD SERVER (Global Aggregation)" style=dashed
+		S_RECV [label="9. Receive group models" color="#ef6c00" fillcolor="#fff3e0" penwidth=2 style=filled]
+		S_AGG [label="10. Compute Global Model
+x̄_(t+1)" color="#ef6c00" fillcolor="#fff3e0" penwidth=2 style=filled]
+		S_UPD [label="11. Update y_(t+1,j)" color="#ef6c00" fillcolor="#fff3e0" penwidth=2 style=filled]
+		S_CAST [label="13. Broadcast x̄_(t+1)" color="#ef6c00" fillcolor="#fff3e0" penwidth=2 style=filled]
+		S_RECV -> S_AGG
+		S_AGG -> S_UPD
+		S_UPD -> S_CAST
+	}
+	subgraph cluster_edge {
+		label="EDGE GROUPS (Group Aggregation)" style=dashed
+		G_RECV [label="5. Receive client models
+Compute avg" color="#2e7d32" fillcolor="#e8f5e9" penwidth=2 style=filled]
+		G_UPD [label="6. Update z_(t,e+1,i)" color="#2e7d32" fillcolor="#e8f5e9" penwidth=2 style=filled]
+		G_BUF [label="7. Buffer group models" color="#2e7d32" fillcolor="#e8f5e9" penwidth=2 style=filled]
+		G_SEND [label="8. Send to Cloud (After E rounds)" color="#2e7d32" fillcolor="#e8f5e9" penwidth=2 style=filled]
+		G_RECV_Y [label="12. Receive y_(t+1,j)
+Broadcast" color="#2e7d32" fillcolor="#e8f5e9" penwidth=2 style=filled]
+		G_RECV -> G_UPD
+		G_UPD -> G_BUF
+		G_BUF -> G_SEND
+	}
+	subgraph cluster_client {
+		label="CLIENTS (Local Training)" style=dashed
+		C_INIT [label="1. Receive Global Model" color="#01579b" fillcolor="#e1f5fe" penwidth=2 style=filled]
+		C_ZINIT [label="2. Initialize z" color="#01579b" fillcolor="#e1f5fe" penwidth=2 style=filled]
+		C_LOOP [label="3. Local SGD Loop" color="#01579b" fillcolor="#e1f5fe" penwidth=2 style=filled]
+		C_SEND [label="4. Send Local Model" color="#01579b" fillcolor="#e1f5fe" penwidth=2 style=filled]
+		C_INIT -> C_ZINIT
+		C_ZINIT -> C_LOOP
+		C_LOOP -> C_SEND
+	}
+	C_SEND -> G_RECV [label=" Local Model"]
+	G_SEND -> S_RECV [label=" Group Model"]
+	S_CAST -> G_RECV_Y [label=" Global Update"]
+	G_RECV_Y -> C_INIT [label=" New Round"]
+}

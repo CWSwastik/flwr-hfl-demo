@@ -5,6 +5,8 @@ import os
 import re
 import time
 import sys
+import signal
+import psutil
 
 CONFIG_FILE = "config.py"
 BACKUP_FILE = "config_backup.py"
@@ -12,6 +14,49 @@ EXPERIMENTS_FILE = "experiments.json"
 
 # Set how many runs you want per configuration (Only used if DEBUG=False)
 NUM_RUNS = 3 
+
+def kill_other_python_processes():
+    """Finds and kills ONLY lingering Python processes related to this FL setup."""
+    print("\n🧹 Sweeping for orphaned FL processes...")
+    current_pid = os.getpid()
+    killed_count = 0
+    
+    # The specific scripts we want to hunt down and kill
+    target_scripts = [
+        "simulate.py", 
+        "client.py", 
+        "edge_server.py", 
+        "central_server.py", 
+        "monitor_process.py"
+    ]
+
+    for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+        try:
+            if proc.info['pid'] == current_pid:
+                continue
+            
+            # Grab the exact command used to launch this process
+            cmdline = proc.info.get('cmdline', [])
+            
+            if cmdline:
+                # Check if any of our target scripts are in the command line arguments
+                is_target = any(script in arg for arg in cmdline for script in target_scripts)
+                
+                if is_target:
+                    os.kill(proc.info['pid'], signal.SIGTERM)
+                    # Print a snippet of the command so you know exactly what was killed
+                    cmd_snippet = ' '.join(cmdline[:3])
+                    print(f"   💀 Killed PID {proc.info['pid']} ({cmd_snippet}...)")
+                    killed_count += 1
+                    
+        except (psutil.NoSuchProcess, psutil.AccessDenied, ProcessLookupError, psutil.ZombieProcess):
+            pass
+            
+    if killed_count == 0:
+        print("   ✨ No zombie FL processes found.")
+    else:
+        print(f"   ✅ Cleaned up {killed_count} FL processes.")
+        time.sleep(2) # Give the OS a moment to reclaim ports and VRAM
 
 def read_config():
     with open(CONFIG_FILE, "r") as f:
@@ -29,7 +74,6 @@ def get_debug_mode_status(config_text):
     match = re.search(r"DEBUG\s*=\s*(True|False)", config_text)
     if match:
         return match.group(1) == "True"
-    # Default to True if not found for safety
     return True
 
 def update_config(config_text, updates):
@@ -37,15 +81,12 @@ def update_config(config_text, updates):
         if isinstance(value, str):
             replacement = f'{key} = "{value}"'
         else:
-            # Handle boolean/numbers
             replacement = f"{key} = {value}"
 
         pattern = rf"{key}\s*=.*"
-        print(f"pattern: {pattern}, replacement: {replacement}")
         if re.search(pattern, config_text):
             config_text = re.sub(pattern, replacement, config_text, count=1)
         else:
-            # If variable doesn't exist, append it
             config_text += f"\n{replacement}\n"
     return config_text
 
@@ -59,13 +100,15 @@ def run_simulation(run_id=None):
         print(f"   ▶️  Launching Single Debug Run...")
     
     try:
-        # sys.executable ensures we use the same python interpreter (conda/venv)
         subprocess.run([sys.executable, "simulate.py"], env=env, check=True)
         print(f"   ✅ Finished.")
     except subprocess.CalledProcessError:
         print(f"   ❌ Failed.")
 
 def main():
+    # 1. Kill any lingering FL processes from previous crashed runs
+    kill_other_python_processes()
+
     if not os.path.exists(BACKUP_FILE):
         shutil.copy(CONFIG_FILE, BACKUP_FILE)
 
@@ -85,22 +128,17 @@ def main():
             print(f"\n{'#'*60}")
             print(f" Running Experiment {i+1}/{total_exps}")
             print(f"{'#'*60}")
-            # print(f"Settings: {json.dumps(exp, indent=2)}\n")
 
-            # 1. Update config.py with current experiment settings
             new_config = update_config(original_config, exp)
             write_config(new_config)
             
-            # 2. Check if we are in DEBUG mode or BATCH mode based on config.py
             is_debug = get_debug_mode_status(new_config)
 
             if is_debug:
                 print("   [Mode] DEBUG=True (Single Execution)")
-                # Run once, no run_id env var needed
                 run_simulation(run_id=None)
             else:
                 print(f"   [Mode] DEBUG=False (Batch Execution, {NUM_RUNS} Runs)")
-                # Run loop
                 for r in range(1, NUM_RUNS + 1):
                     print(f"\n--- Cycle {r} of {NUM_RUNS} ---")
                     run_simulation(r)
@@ -120,6 +158,9 @@ def main():
         write_config(original_config)
         if os.path.exists(BACKUP_FILE):
             os.remove(BACKUP_FILE)
+            
+        # 2. Final cleanup to ensure no background processes outlive the main script
+        kill_other_python_processes()
         print(" Done.")
 
 if __name__ == "__main__":
