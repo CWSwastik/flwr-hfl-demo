@@ -178,18 +178,17 @@ def train_with_zi_yi(net, trainloader, optimizer, epochs, beta, zi, yi, verbose=
             loss = criterion(outputs, labels)
             loss.backward()
 
+            # --- accumulate gradients ---
+            with torch.no_grad():
+                for name, p in net.named_parameters():
+                    if p.grad is not None:
+                        grad_accumulator[name] += p.grad.clone()
             # --- apply gradient correction per-parameter ---
             with torch.no_grad():
                 for name, p in net.named_parameters():
                     if p.grad is not None:
                         correction = beta * (zi.get(name, 0.0) + yi.get(name, 0.0))
                         p.grad += correction
-
-            # --- accumulate gradients ---
-            with torch.no_grad():
-                for name, p in net.named_parameters():
-                    if p.grad is not None:
-                        grad_accumulator[name] += p.grad.clone()
 
             optimizer.step()
             num_batches += 1

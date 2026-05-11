@@ -405,6 +405,8 @@ def spawn_processes():
                 gpu_iterator += 1
                 process_env["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
 
+            proc = subprocess.Popen("ulimit -n 65536", shell=True, env=process_env)
+            procs.append((name, proc))
             cmd = ""
             if kind == "server":
                 cmd = f'python "{get_abs_path("monitor_process.py")}" --name {name} --kind server -- python "{get_abs_path("central_server.py")}" {cfg["host"]}:{cfg["port"]} --exp_id {EXP_ID} --min_edges {min_edges}'

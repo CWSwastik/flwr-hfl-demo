@@ -7,11 +7,11 @@ import os
 #                 Expects 'FL_RUN_ID' from run_experiments.py to set dynamic seeds.
 DEBUG = True 
 
-NUM_ROUNDS = 20
-TOPOLOGY_FILE = "topo-15c.yml"
+NUM_ROUNDS = 100
+TOPOLOGY_FILE = "topo-100c.yml"
 
-NUM_CLIENTS = 15
-MIN_CLIENTS_PER_EDGE = 5
+NUM_CLIENTS = 100
+MIN_CLIENTS_PER_EDGE = 10
 
 MODEL = "lenet_mnist"
 DATASET = "mnist"
@@ -58,7 +58,7 @@ NUM_CLASSES = 10  # total number of classes in the dataset
 CLUSTER_STRATEGY = "none"
 DISSIMILAR_CLUSTERING = False
 
-GRADIENT_CORRECTION_BETA = 1
+GRADIENT_CORRECTION_BETA = 0
 
 TRAINING_LEARNING_RATE = 0.0005
 TRAINING_WEIGHT_DECAY = 1e-4
@@ -69,11 +69,11 @@ TRAINING_STRATEGY = "fedavg"
 FedProx_MU = 0.01
 
 # Options: "none", "quantization", "topk", "shap", "fisher"
-COMPRESSION_METHOD = "quantization"
+COMPRESSION_METHOD = "none"
 
 # Fine-grained control: Only compress these specific control variates?
-COMPRESS_YI = True  
-COMPRESS_ZI = True
+COMPRESS_YI = False
+COMPRESS_ZI = False
 
 # Compression Hyperparameters
 QUANTIZATION_BITS = 8
