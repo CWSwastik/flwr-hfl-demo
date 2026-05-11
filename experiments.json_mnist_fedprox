@@ -9,10 +9,7 @@
     "PARTITIONER" : "iid",
     "GRADIENT_CORRECTION_BETA": 0,
     "NUM_ROUNDS": 100,
-    "TRAINING_STRATEGY": "fedmut",
-    "FEDMUT_ALPHA": 4,
-    "FEDMUT_CENTRAL": 0,
-    "FEDMUT_EDGE": 1,
+    "TRAINING_STRATEGY": "fedprox",
     "TRAINING_LEARNING_RATE": 0.0005
   },
   {
@@ -25,10 +22,7 @@
     "PARTITIONER" : "iid",
     "GRADIENT_CORRECTION_BETA": 0,
     "NUM_ROUNDS": 100,
-    "TRAINING_STRATEGY": "fedmut",
-    "FEDMUT_ALPHA": 4,
-    "FEDMUT_CENTRAL": 0,
-    "FEDMUT_EDGE": 1,
+    "TRAINING_STRATEGY": "fedprox",
     "TRAINING_LEARNING_RATE": 0.0005
   },
   {
@@ -41,10 +35,7 @@
     "PARTITIONER" : "iid",
     "GRADIENT_CORRECTION_BETA": 0,
     "NUM_ROUNDS": 100,
-    "TRAINING_STRATEGY": "fedmut",
-    "FEDMUT_ALPHA": 4,
-    "FEDMUT_CENTRAL": 0,
-    "FEDMUT_EDGE": 1,
+    "TRAINING_STRATEGY": "fedprox",
     "TRAINING_LEARNING_RATE": 0.0005
   },
   {
@@ -57,10 +48,7 @@
     "PARTITIONER" : "iid",
     "GRADIENT_CORRECTION_BETA": 0,
     "NUM_ROUNDS": 100,
-    "TRAINING_STRATEGY": "fedmut",
-    "FEDMUT_ALPHA": 4,
-    "FEDMUT_CENTRAL": 0,
-    "FEDMUT_EDGE": 1,
+    "TRAINING_STRATEGY": "fedprox",
     "TRAINING_LEARNING_RATE": 0.0005
   },
   {
@@ -74,10 +62,7 @@
     "DIRICHLET_ALPHA": 0.1,
     "GRADIENT_CORRECTION_BETA": 0,
     "NUM_ROUNDS": 100,
-    "TRAINING_STRATEGY": "fedmut",
-    "FEDMUT_ALPHA": 4,
-    "FEDMUT_CENTRAL": 0,
-    "FEDMUT_EDGE": 1,
+    "TRAINING_STRATEGY": "fedprox",
     "TRAINING_LEARNING_RATE": 0.0005
   },
   {
@@ -91,10 +76,7 @@
     "DIRICHLET_ALPHA": 0.1,
     "GRADIENT_CORRECTION_BETA": 0,
     "NUM_ROUNDS": 100,
-    "TRAINING_STRATEGY": "fedmut",
-    "FEDMUT_ALPHA": 4,
-    "FEDMUT_CENTRAL": 0,
-    "FEDMUT_EDGE": 1,
+    "TRAINING_STRATEGY": "fedprox",
     "TRAINING_LEARNING_RATE": 0.0005
   },
   {
@@ -108,10 +90,7 @@
     "DIRICHLET_ALPHA": 0.1,
     "GRADIENT_CORRECTION_BETA": 0,
     "NUM_ROUNDS": 100,
-    "TRAINING_STRATEGY": "fedmut",
-    "FEDMUT_ALPHA": 4,
-    "FEDMUT_CENTRAL": 0,
-    "FEDMUT_EDGE": 1,
+    "TRAINING_STRATEGY": "fedprox",
     "TRAINING_LEARNING_RATE": 0.0005
   },
   {
@@ -125,10 +104,7 @@
     "DIRICHLET_ALPHA": 0.1,
     "GRADIENT_CORRECTION_BETA": 0,
     "NUM_ROUNDS": 100,
-    "TRAINING_STRATEGY": "fedmut",
-    "FEDMUT_ALPHA": 4,
-    "FEDMUT_CENTRAL": 0,
-    "FEDMUT_EDGE": 1,
+    "TRAINING_STRATEGY": "fedprox",
     "TRAINING_LEARNING_RATE": 0.0005
   },
   {
@@ -142,10 +118,7 @@
     "DIRICHLET_ALPHA": 0.5,
     "GRADIENT_CORRECTION_BETA": 0,
     "NUM_ROUNDS": 100,
-    "TRAINING_STRATEGY": "fedmut",
-    "FEDMUT_ALPHA": 4,
-    "FEDMUT_CENTRAL": 0,
-    "FEDMUT_EDGE": 1,
+    "TRAINING_STRATEGY": "fedprox",
     "TRAINING_LEARNING_RATE": 0.0005
   },
   {
@@ -159,10 +132,7 @@
     "DIRICHLET_ALPHA": 0.5,
     "GRADIENT_CORRECTION_BETA": 0,
     "NUM_ROUNDS": 100,
-    "TRAINING_STRATEGY": "fedmut",
-    "FEDMUT_ALPHA": 4,
-    "FEDMUT_CENTRAL": 0,
-    "FEDMUT_EDGE": 1,
+    "TRAINING_STRATEGY": "fedprox",
     "TRAINING_LEARNING_RATE": 0.0005
   },
   {
@@ -176,10 +146,7 @@
     "DIRICHLET_ALPHA": 0.5,
     "GRADIENT_CORRECTION_BETA": 0,
     "NUM_ROUNDS": 100,
-    "TRAINING_STRATEGY": "fedmut",
-    "FEDMUT_ALPHA": 4,
-    "FEDMUT_CENTRAL": 0,
-    "FEDMUT_EDGE": 1,
+    "TRAINING_STRATEGY": "fedprox",
     "TRAINING_LEARNING_RATE": 0.0005
   },
   {
@@ -193,10 +160,7 @@
     "DIRICHLET_ALPHA": 0.5,
     "GRADIENT_CORRECTION_BETA": 0,
     "NUM_ROUNDS": 100,
-    "TRAINING_STRATEGY": "fedmut",
-    "FEDMUT_ALPHA": 4,
-    "FEDMUT_CENTRAL": 0,
-    "FEDMUT_EDGE": 1,
+    "TRAINING_STRATEGY": "fedprox",
     "TRAINING_LEARNING_RATE": 0.0005
   }
 ]

@@ -9,18 +9,7 @@
     "PARTITIONER" : "iid",
     "GRADIENT_CORRECTION_BETA": 0,
     "NUM_ROUNDS": 100,
-    "TRAINING_LEARNING_RATE": 0.001
-  },
-  {
-    "TOPOLOGY_FILE": "topo-15c.yml",
-    "NUM_CLIENTS": 15,
-    "MIN_CLIENTS_PER_EDGE": 5,
-    "DATASET": "cifar10",
-    "MODEL": "resnet18",
-    "CLUSTER_STRATEGY": "none",
-    "PARTITIONER" : "iid",
-    "GRADIENT_CORRECTION_BETA": 1,
-    "NUM_ROUNDS": 100,
+    "TRAINING_STRATEGY": "fedprox",
     "TRAINING_LEARNING_RATE": 0.001
   },
   {
@@ -33,18 +22,7 @@
     "PARTITIONER" : "iid",
     "GRADIENT_CORRECTION_BETA": 0,
     "NUM_ROUNDS": 100,
-    "TRAINING_LEARNING_RATE": 0.001
-  },
-  {
-    "TOPOLOGY_FILE": "topo-15c.yml",
-    "NUM_CLIENTS": 15,
-    "MIN_CLIENTS_PER_EDGE": 5,
-    "DATASET": "cifar10",
-    "MODEL": "resnet18",
-    "CLUSTER_STRATEGY": "cosine",
-    "PARTITIONER" : "iid",
-    "GRADIENT_CORRECTION_BETA": 1,
-    "NUM_ROUNDS": 100,
+    "TRAINING_STRATEGY": "fedprox",
     "TRAINING_LEARNING_RATE": 0.001
   },
   {
@@ -57,18 +35,7 @@
     "PARTITIONER" : "iid",
     "GRADIENT_CORRECTION_BETA": 0,
     "NUM_ROUNDS": 100,
-    "TRAINING_LEARNING_RATE": 0.001
-  },
-  {
-    "TOPOLOGY_FILE": "topo-15c.yml",
-    "NUM_CLIENTS": 15,
-    "MIN_CLIENTS_PER_EDGE": 5,
-    "DATASET": "cifar10",
-    "MODEL": "resnet18",
-    "CLUSTER_STRATEGY": "emd",
-    "PARTITIONER" : "iid",
-    "GRADIENT_CORRECTION_BETA": 1,
-    "NUM_ROUNDS": 100,
+    "TRAINING_STRATEGY": "fedprox",
     "TRAINING_LEARNING_RATE": 0.001
   },
   {
@@ -81,18 +48,7 @@
     "PARTITIONER" : "iid",
     "GRADIENT_CORRECTION_BETA": 0,
     "NUM_ROUNDS": 100,
-    "TRAINING_LEARNING_RATE": 0.001
-  },
-  {
-    "TOPOLOGY_FILE": "topo-15c.yml",
-    "NUM_CLIENTS": 15,
-    "MIN_CLIENTS_PER_EDGE": 5,
-    "DATASET": "cifar10",
-    "MODEL": "resnet18",
-    "CLUSTER_STRATEGY": "jsd",
-    "PARTITIONER" : "iid",
-    "GRADIENT_CORRECTION_BETA": 1,
-    "NUM_ROUNDS": 100,
+    "TRAINING_STRATEGY": "fedprox",
     "TRAINING_LEARNING_RATE": 0.001
   },
   {
@@ -106,19 +62,7 @@
     "DIRICHLET_ALPHA": 0.1,
     "GRADIENT_CORRECTION_BETA": 0,
     "NUM_ROUNDS": 100,
-    "TRAINING_LEARNING_RATE": 0.001
-  },
-  {
-    "TOPOLOGY_FILE": "topo-15c.yml",
-    "NUM_CLIENTS": 15,
-    "MIN_CLIENTS_PER_EDGE": 5,
-    "DATASET": "cifar10",
-    "MODEL": "resnet18",
-    "CLUSTER_STRATEGY": "none",
-    "PARTITIONER" : "dirichlet",
-    "DIRICHLET_ALPHA": 0.1,
-    "GRADIENT_CORRECTION_BETA": 1,
-    "NUM_ROUNDS": 100,
+    "TRAINING_STRATEGY": "fedprox",
     "TRAINING_LEARNING_RATE": 0.001
   },
   {
@@ -132,19 +76,7 @@
     "DIRICHLET_ALPHA": 0.1,
     "GRADIENT_CORRECTION_BETA": 0,
     "NUM_ROUNDS": 100,
-    "TRAINING_LEARNING_RATE": 0.001
-  },
-  {
-    "TOPOLOGY_FILE": "topo-15c.yml",
-    "NUM_CLIENTS": 15,
-    "MIN_CLIENTS_PER_EDGE": 5,
-    "DATASET": "cifar10",
-    "MODEL": "resnet18",
-    "CLUSTER_STRATEGY": "cosine",
-    "PARTITIONER" : "dirichlet",
-    "DIRICHLET_ALPHA": 0.1,
-    "GRADIENT_CORRECTION_BETA": 1,
-    "NUM_ROUNDS": 100,
+    "TRAINING_STRATEGY": "fedprox",
     "TRAINING_LEARNING_RATE": 0.001
   },
   {
@@ -158,19 +90,7 @@
     "DIRICHLET_ALPHA": 0.1,
     "GRADIENT_CORRECTION_BETA": 0,
     "NUM_ROUNDS": 100,
-    "TRAINING_LEARNING_RATE": 0.001
-  },
-  {
-    "TOPOLOGY_FILE": "topo-15c.yml",
-    "NUM_CLIENTS": 15,
-    "MIN_CLIENTS_PER_EDGE": 5,
-    "DATASET": "cifar10",
-    "MODEL": "resnet18",
-    "CLUSTER_STRATEGY": "emd",
-    "PARTITIONER" : "dirichlet",
-    "DIRICHLET_ALPHA": 0.1,
-    "GRADIENT_CORRECTION_BETA": 1,
-    "NUM_ROUNDS": 100,
+    "TRAINING_STRATEGY": "fedprox",
     "TRAINING_LEARNING_RATE": 0.001
   },
   {
@@ -184,19 +104,7 @@
     "DIRICHLET_ALPHA": 0.1,
     "GRADIENT_CORRECTION_BETA": 0,
     "NUM_ROUNDS": 100,
-    "TRAINING_LEARNING_RATE": 0.001
-  },
-  {
-    "TOPOLOGY_FILE": "topo-15c.yml",
-    "NUM_CLIENTS": 15,
-    "MIN_CLIENTS_PER_EDGE": 5,
-    "DATASET": "cifar10",
-    "MODEL": "resnet18",
-    "CLUSTER_STRATEGY": "jsd",
-    "PARTITIONER" : "dirichlet",
-    "DIRICHLET_ALPHA": 0.1,
-    "GRADIENT_CORRECTION_BETA": 1,
-    "NUM_ROUNDS": 100,
+    "TRAINING_STRATEGY": "fedprox",
     "TRAINING_LEARNING_RATE": 0.001
   },
   {
@@ -210,19 +118,7 @@
     "DIRICHLET_ALPHA": 0.5,
     "GRADIENT_CORRECTION_BETA": 0,
     "NUM_ROUNDS": 100,
-    "TRAINING_LEARNING_RATE": 0.001
-  },
-  {
-    "TOPOLOGY_FILE": "topo-15c.yml",
-    "NUM_CLIENTS": 15,
-    "MIN_CLIENTS_PER_EDGE": 5,
-    "DATASET": "cifar10",
-    "MODEL": "resnet18",
-    "CLUSTER_STRATEGY": "none",
-    "PARTITIONER" : "dirichlet",
-    "DIRICHLET_ALPHA": 0.5,
-    "GRADIENT_CORRECTION_BETA": 1,
-    "NUM_ROUNDS": 100,
+    "TRAINING_STRATEGY": "fedprox",
     "TRAINING_LEARNING_RATE": 0.001
   },
   {
@@ -236,19 +132,7 @@
     "DIRICHLET_ALPHA": 0.5,
     "GRADIENT_CORRECTION_BETA": 0,
     "NUM_ROUNDS": 100,
-    "TRAINING_LEARNING_RATE": 0.001
-  },
-  {
-    "TOPOLOGY_FILE": "topo-15c.yml",
-    "NUM_CLIENTS": 15,
-    "MIN_CLIENTS_PER_EDGE": 5,
-    "DATASET": "cifar10",
-    "MODEL": "resnet18",
-    "CLUSTER_STRATEGY": "cosine",
-    "PARTITIONER" : "dirichlet",
-    "DIRICHLET_ALPHA": 0.5,
-    "GRADIENT_CORRECTION_BETA": 1,
-    "NUM_ROUNDS": 100,
+    "TRAINING_STRATEGY": "fedprox",
     "TRAINING_LEARNING_RATE": 0.001
   },
   {
@@ -262,19 +146,7 @@
     "DIRICHLET_ALPHA": 0.5,
     "GRADIENT_CORRECTION_BETA": 0,
     "NUM_ROUNDS": 100,
-    "TRAINING_LEARNING_RATE": 0.001
-  },
-  {
-    "TOPOLOGY_FILE": "topo-15c.yml",
-    "NUM_CLIENTS": 15,
-    "MIN_CLIENTS_PER_EDGE": 5,
-    "DATASET": "cifar10",
-    "MODEL": "resnet18",
-    "CLUSTER_STRATEGY": "emd",
-    "PARTITIONER" : "dirichlet",
-    "DIRICHLET_ALPHA": 0.5,
-    "GRADIENT_CORRECTION_BETA": 1,
-    "NUM_ROUNDS": 100,
+    "TRAINING_STRATEGY": "fedprox",
     "TRAINING_LEARNING_RATE": 0.001
   },
   {
@@ -288,19 +160,7 @@
     "DIRICHLET_ALPHA": 0.5,
     "GRADIENT_CORRECTION_BETA": 0,
     "NUM_ROUNDS": 100,
-    "TRAINING_LEARNING_RATE": 0.001
-  },
-  {
-    "TOPOLOGY_FILE": "topo-15c.yml",
-    "NUM_CLIENTS": 15,
-    "MIN_CLIENTS_PER_EDGE": 5,
-    "DATASET": "cifar10",
-    "MODEL": "resnet18",
-    "CLUSTER_STRATEGY": "jsd",
-    "PARTITIONER" : "dirichlet",
-    "DIRICHLET_ALPHA": 0.5,
-    "GRADIENT_CORRECTION_BETA": 1,
-    "NUM_ROUNDS": 100,
+    "TRAINING_STRATEGY": "fedprox",
     "TRAINING_LEARNING_RATE": 0.001
   }
 ]
