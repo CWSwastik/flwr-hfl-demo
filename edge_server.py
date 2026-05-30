@@ -326,6 +326,22 @@ class EdgeStrategy(fl.server.strategy.FedAvg):
                     yi_comp_time = time.time() - yi_comp_start
                     final_yi_compressed = True
 
+        # --- Raw-measure yi sizes once (identical for every client this round) ---
+        # yi_u: prefer the true raw byte-count forwarded by central. Never fall back
+        # to measuring a compressed blob as "uncompressed" (would report ratio ~1.0).
+        # yi_c: raw-measure the compressed dict's array bytes, not the pickle frame.
+        yi_u = self.shared_state.get("yi_uncompressed_bytes", 0)
+        if final_yi_compressed and final_yi_blob:
+            yi_dict_compressed = unpack_compressed_data(final_yi_blob)
+            yi_c = get_payload_size(yi_dict_compressed)
+            if not yi_u:
+                # Fallback: reconstruct the raw dict and measure it (metrics-only).
+                yi_u = get_payload_size(decompress_model_update(yi_dict_compressed))
+        else:
+            if not yi_u:
+                yi_u = get_payload_size(pickle.loads(yi_blob)) if yi_blob else 0
+            yi_c = yi_u
+
         zi_per_client = self.shared_state.get("zi_per_client", {})
         beta = GRADIENT_CORRECTION_BETA
 
@@ -375,7 +391,9 @@ class EdgeStrategy(fl.server.strategy.FedAvg):
                     compressed_zi = compress_model_update(client_zi)
                     # Convert array to bytes
                     zi_blob = pack_compressed_data(compressed_zi).tobytes()
-                    zi_c = get_payload_size(zi_blob)
+                    # Raw-measure the compressed dict, not the pickle-framed blob,
+                    # to stay consistent with the raw-measured zi_u.
+                    zi_c = get_payload_size(compressed_zi)
                     zi_comp_time = time.time() - comp_start
                     zi_is_compressed = True
                 else:
@@ -395,11 +413,10 @@ class EdgeStrategy(fl.server.strategy.FedAvg):
                 "compression_method": COMPRESSION_METHOD 
             })
 
-            model_u = get_payload_size(current_weights) 
+            model_u = get_payload_size(current_weights)
             model_c = model_u
-            yi_u = get_payload_size(yi_blob)
-            yi_c = get_payload_size(final_yi_blob)
-            
+            # yi_u / yi_c computed once before the loop (identical for all clients).
+
             metrics = get_traffic_metrics(
                 round_num=current_global_round,
                 # direction=f"Downlink_to_{getattr(client, 'cid', 'unknown')}",
@@ -494,6 +511,9 @@ def run_edge_as_client(shared_state):
                 yi_compressed = config.get("yi_compressed", False)
                 self.shared_state["yi"] = yi_blob
                 self.shared_state["yi_is_compressed"] = yi_compressed
+                # Forwarded from central so the edge can log the true raw yi
+                # size, even when COMPRESS_YI=True makes yi_blob arrive compressed.
+                self.shared_state["yi_uncompressed_bytes"] = config.get("yi_uncompressed_bytes", 0)
 
                 server_process = multiprocessing.Process(
                     target=run_edge_server,
@@ -542,7 +562,9 @@ def run_edge_as_client(shared_state):
 
                         payload_tail = [packed_blob]
                         comp_time = t_end - t_start
-                        grad_c = get_payload_size(packed_blob)
+                        # Raw-measure the compressed dict, not the pickle-framed blob,
+                        # to stay consistent with the raw-measured grad_u.
+                        grad_c = get_payload_size(compressed_grads)
                         metrics = {"is_compressed": True, "model_length": len(edge_weights), "client_name": args.name}
                     else:
                         grad_list_padded = []

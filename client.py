@@ -225,9 +225,12 @@ class FlowerClient(fl.client.NumPyClient):
             
             model_u = get_payload_size(model_params_list)
             model_c = model_u
+            # `grads_dict` is dict[str, np.ndarray]; `gradients` is dict[str, torch.Tensor]
+            # — get_payload_size does not handle torch tensors and would under-count
+            # by ~10000x. Always measure from the numpy form.
             before_quantization = get_payload_size(grads_dict)
 
-            grads_u = get_payload_size(gradients)
+            grads_u = before_quantization
             grads_c = grads_u
             comp_time = 0.0
             payload_tail = []
@@ -246,8 +249,10 @@ class FlowerClient(fl.client.NumPyClient):
                 
                 payload_tail = [packed_grads_blob]
                 
-                # after_quantization = get_payload_size(compressed_grads_dict)
-                grads_c = get_payload_size(packed_grads_blob)
+                # Raw-measure the compressed dict (vals/idxs/q array bytes), not the
+                # pickle-framed blob — keeps grads_c comparable to the raw-measured
+                # grads_u and isolates the method's true compression ratio.
+                grads_c = get_payload_size(compressed_grads_dict)
                 comp_time = time.time() - t_start
                 
                 print(f"Compressed: {before_quantization/1024:.1f}KB -> {grads_c/1024:.1f}KB")

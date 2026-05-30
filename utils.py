@@ -239,18 +239,18 @@ def train_fedprox_with_zi_yi(net, trainloader, optimizer: torch.optim.Adam, epoc
             loss += (mu / 2) * proximal_term
 
             loss.backward()
+            # --- accumulate RAW gradients (before correction) so the
+            # control-variate signal sent back is not self-amplifying. ---
+            with torch.no_grad():
+                for name, p in net.named_parameters():
+                    if p.grad is not None:
+                        grad_accumulator[name] += p.grad.clone()
             # --- apply gradient correction per-parameter ---
             with torch.no_grad():
                 for name, p in net.named_parameters():
                     if p.grad is not None:
                         correction = beta * (zi.get(name, 0.0) + yi.get(name, 0.0))
                         p.grad += correction
-
-            # --- accumulate gradients ---
-            with torch.no_grad():
-                for name, p in net.named_parameters():
-                    if p.grad is not None:
-                        grad_accumulator[name] += p.grad.clone()
 
             optimizer.step()
             num_batches += 1

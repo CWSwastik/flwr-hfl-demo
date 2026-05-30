@@ -261,9 +261,11 @@ class FedAvgWithGradientCorrection(fl.server.strategy.FedAvg):
                 # 2. Compress & Pack
                 compressed_yi = compress_model_update(yi_dict_to_send)
                 yi_array = pack_compressed_data(compressed_yi)
-                yi_blob = yi_array.tobytes() 
+                yi_blob = yi_array.tobytes()
                 comp_time = time.time() - comp_start
-                yi_c = get_payload_size(yi_blob)
+                # Raw-measure the compressed dict (not the pickle-framed blob) so
+                # yi_c is consistent with the raw-measured yi_u above.
+                yi_c = get_payload_size(compressed_yi)
                 yi_is_compressed = True
 
                 # # 3. Append to parameters (Weights + Blob)
@@ -279,6 +281,10 @@ class FedAvgWithGradientCorrection(fl.server.strategy.FedAvg):
             
             cfg["yi"] = yi_blob
             cfg["yi_compressed"] = yi_is_compressed
+            # Edge cannot recover the raw yi dict size from the (already-compressed
+            # or pickled) blob it receives, so we forward the true uncompressed
+            # byte count as metadata for accurate downlink Y_i_MB logging.
+            cfg["yi_uncompressed_bytes"] = int(yi_u)
             target_id = c_name if c_name != "unknown" else f"Edge_Index_{i}"
             # --- Log Traffic Metrics ---
             metrics = get_traffic_metrics(
