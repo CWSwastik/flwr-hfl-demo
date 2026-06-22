@@ -499,6 +499,15 @@ def run_edge_as_client(shared_state):
                     if agg_model is not None:
                         num_examples = self.shared_state.get("num_examples")
                         edge_weights = parameters_to_ndarrays(agg_model)
+                        # Log the edge->central uplink in the non-GC path too
+                        # (model weights only; no gradients are forwarded here)
+                        # so the bandwidth totals count every hop fairly.
+                        model_u = get_payload_size(edge_weights)
+                        self.traffic_logger.log(get_traffic_metrics(
+                            round_num=config["round"],
+                            direction="Uplink",
+                            model_tuple=(model_u, model_u),
+                        ))
                         self.shared_state["aggregated_model"] = None
                         gc.collect()
                         return edge_weights, num_examples, {}

@@ -189,7 +189,17 @@ class FlowerClient(fl.client.NumPyClient):
                     losses, accuracies = train_fedprox(
                         self.net, self.trainloader, self.optimizer, epochs=local_epochs, mu=FedProx_MU,
                     )
-                return get_parameters(self.net), len(self.trainloader.dataset), {}
+                # Log the client->edge uplink even in the non-GC path (model
+                # weights only; no gradients/control variates are sent here) so
+                # the bandwidth comparison vs SCAFFOLD counts every hop fairly.
+                model_params_list = get_parameters(self.net)
+                model_u = get_payload_size(model_params_list)
+                self.traffic_logger.log(get_traffic_metrics(
+                    round_num=config["round"],
+                    direction="Uplink",
+                    model_tuple=(model_u, model_u),
+                ))
+                return model_params_list, len(self.trainloader.dataset), {}
 
             # --- Gradient Correction Setup ---
             device = next(self.net.parameters()).device
