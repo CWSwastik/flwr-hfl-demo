@@ -1,22 +1,43 @@
 import json
-import subprocess
-import shutil
 import os
 import re
 import time
 import sys
-import signal
+import subprocess
 import psutil
 
 CONFIG_FILE = "config.py"
-BACKUP_FILE = "config_backup.py"
-EXPERIMENTS_FILE = "experiments.json"
+# Experiments file: CLI arg > FL_EXPERIMENTS_FILE env > default.
+# Lets each SLURM job point at its own json without any `cp`.
+EXPERIMENTS_FILE = (
+    sys.argv[1] if len(sys.argv) > 1
+    else os.environ.get("FL_EXPERIMENTS_FILE", "experiments.json")
+)
 
-# Set how many runs you want per configuration (Only used if DEBUG=False)
-NUM_RUNS = 3 
+# Default runs per configuration when DEBUG=False.
+# Override per experiment with a "NUM_RUNS" key in the json.
+NUM_RUNS = 3
+
+# Per-job identity. Children inherit FL_JOB_TAG via env, so parallel jobs on
+# the same node only ever kill their own processes and read their own config
+# overrides file.
+JOB_TAG = os.environ.get("SLURM_JOB_ID") or f"pid{os.getpid()}"
+OVERRIDES_FILE = os.path.abspath(f".fl_overrides_{JOB_TAG}.json")
+
+def _is_stale_tag(tag):
+    """A pid-style tag whose run_experiments.py is dead marks a crashed
+    local batch; its orphans are fair game for cleanup."""
+    if tag and tag.startswith("pid"):
+        try:
+            return not psutil.pid_exists(int(tag[3:]))
+        except ValueError:
+            return False
+    return False
 
 def kill_other_python_processes(quiet=False):
-    """Finds and kills ONLY lingering Python processes related to this FL setup.
+    """Finds and kills ONLY lingering FL processes belonging to THIS job
+    (matching FL_JOB_TAG), plus orphans of crashed local batches.
+    Other parallel jobs and manual (untagged) runs are never touched.
 
     SIGTERM first, wait, then SIGKILL anything still alive.
     """
@@ -38,7 +59,10 @@ def kill_other_python_processes(quiet=False):
             if proc.info['pid'] == current_pid:
                 continue
             cmdline = proc.info.get('cmdline', [])
-            if cmdline and any(script in arg for arg in cmdline for script in target_scripts):
+            if not (cmdline and any(script in arg for arg in cmdline for script in target_scripts)):
+                continue
+            tag = proc.environ().get("FL_JOB_TAG")
+            if tag == JOB_TAG or _is_stale_tag(tag):
                 victims.append(proc)
         except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
             pass
@@ -75,24 +99,11 @@ def kill_other_python_processes(quiet=False):
     time.sleep(2)  # let OS reclaim ports / VRAM
     return len(victims)
 
-def read_config():
+def get_default_debug_status():
+    """Default DEBUG value from config.py, used when an experiment
+    doesn't set its own "DEBUG" key."""
     with open(CONFIG_FILE, "r") as f:
-        return f.read()
-
-def write_config(text):
-    # Atomic write: avoid corrupting config.py if interrupted mid-write
-    tmp = CONFIG_FILE + ".tmp"
-    with open(tmp, "w") as f:
-        f.write(text)
-        f.flush()
-        os.fsync(f.fileno())
-    os.replace(tmp, CONFIG_FILE)
-
-def get_debug_mode_status(config_text):
-    """
-    Parses the config text to find 'DEBUG = True' or 'DEBUG = False'.
-    Returns True if DEBUG is enabled, False otherwise.
-    """
+        config_text = f.read()
     # Anchor to start-of-line + MULTILINE so we don't match `DEBUG = True`
     # text that appears inside the comment block at the top of config.py.
     match = re.search(r"^DEBUG\s*=\s*(True|False)", config_text, flags=re.MULTILINE)
@@ -100,21 +111,14 @@ def get_debug_mode_status(config_text):
         return match.group(1) == "True"
     return True
 
-def update_config(config_text, updates):
-    for key, value in updates.items():
-        if isinstance(value, str):
-            replacement = f'{key} = "{value}"'
-        else:
-            replacement = f"{key} = {value}"
-
-        # Word-boundary + MULTILINE so `LR` does not match `BASE_LR`,
-        # and `.*` only consumes the rest of the same line.
-        pattern = rf"^{re.escape(key)}\s*=[^\n]*"
-        if re.search(pattern, config_text, flags=re.MULTILINE):
-            config_text = re.sub(pattern, replacement, config_text, count=1, flags=re.MULTILINE)
-        else:
-            config_text += f"\n{replacement}\n"
-    return config_text
+def write_overrides(exp):
+    # Atomic write: children read this file on every import of config.py
+    tmp = OVERRIDES_FILE + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(exp, f, indent=2)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, OVERRIDES_FILE)
 
 def run_simulation(run_id=None):
     env = os.environ.copy()
@@ -134,13 +138,13 @@ def run_simulation(run_id=None):
         return False
 
 def main():
+    # Children (simulate.py and everything it spawns) inherit these.
+    os.environ["FL_JOB_TAG"] = JOB_TAG
+    os.environ["FL_CONFIG_OVERRIDES"] = OVERRIDES_FILE
+    print(f"[Job] Tag: {JOB_TAG} | Experiments: {EXPERIMENTS_FILE}")
+
     # 1. Kill any lingering FL processes from previous crashed runs
     kill_other_python_processes()
-
-    if not os.path.exists(BACKUP_FILE):
-        shutil.copy(CONFIG_FILE, BACKUP_FILE)
-
-    original_config = read_config()
 
     try:
         if not os.path.exists(EXPERIMENTS_FILE):
@@ -150,6 +154,7 @@ def main():
         with open(EXPERIMENTS_FILE, "r") as f:
             experiments = json.load(f)
 
+        default_debug = get_default_debug_status()
         total_exps = len(experiments)
         failures = []  # list of (exp_index, run_id_or_None)
 
@@ -158,19 +163,19 @@ def main():
             print(f" Running Experiment {i+1}/{total_exps}")
             print(f"{'#'*60}")
 
-            new_config = update_config(original_config, exp)
-            write_config(new_config)
+            write_overrides(exp)
 
-            is_debug = get_debug_mode_status(new_config)
+            is_debug = bool(exp.get("DEBUG", default_debug))
+            num_runs = int(exp.get("NUM_RUNS", NUM_RUNS))
 
             if is_debug:
                 print("   [Mode] DEBUG=True (Single Execution)")
                 if not run_simulation(run_id=None):
                     failures.append((i + 1, None))
             else:
-                print(f"   [Mode] DEBUG=False (Batch Execution, {NUM_RUNS} Runs)")
-                for r in range(1, NUM_RUNS + 1):
-                    print(f"\n--- Cycle {r} of {NUM_RUNS} ---")
+                print(f"   [Mode] DEBUG=False (Batch Execution, {num_runs} Runs)")
+                for r in range(1, num_runs + 1):
+                    print(f"\n--- Cycle {r} of {num_runs} ---")
                     if not run_simulation(r):
                         failures.append((i + 1, r))
                     # Kill any orphans BEFORE next cycle so port/VRAM reclaim
@@ -199,12 +204,9 @@ def main():
     except Exception as e:
         print(f"\n[!] Unexpected error: {e}")
     finally:
-        print(f"\n{'='*60}")
-        print(" Restoring original config.py...")
-        write_config(original_config)
-        if os.path.exists(BACKUP_FILE):
-            os.remove(BACKUP_FILE)
-            
+        if os.path.exists(OVERRIDES_FILE):
+            os.remove(OVERRIDES_FILE)
+
         # 2. Final cleanup to ensure no background processes outlive the main script
         kill_other_python_processes()
         print(" Done.")

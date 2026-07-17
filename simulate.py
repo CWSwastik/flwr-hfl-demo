@@ -53,6 +53,73 @@ def get_free_port():
         return s.getsockname()[1]
 
 
+def _probe_port(port):
+    """Try to bind `port` (0 = any free port). Returns (socket, port) with
+    the socket KEPT OPEN to hold the port, or (None, None) if it's taken."""
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    # Allow rebinding our own just-released ports (TIME_WAIT)
+    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    try:
+        s.bind(("", port))
+        return s, s.getsockname()[1]
+    except OSError:
+        s.close()
+        return None, None
+
+
+def remap_topology_ports(topology, force=False):
+    """Make sure every listening address in the topology is actually free,
+    remapping to fresh ports where needed. The remap is keyed on the original
+    (host, port), so entries wired to the same address move together
+    (clients/edges reference each other by literal host:port in the yml).
+
+    force=True (FL_AUTO_PORTS=1): remap everything unconditionally. Needed for
+    parallel jobs on one node: a sibling job may not have bound its yml ports
+    YET, so "is it free right now" is not a safe test.
+
+    Returns the probe sockets, kept bound so no other job can take the chosen
+    ports before our servers start. Close them just before spawning.
+    """
+    remap = {}  # (host, orig_port) -> new_port
+    held_sockets = []
+
+    def resolve(host, port):
+        key = (host, port)
+        if key in remap:
+            return remap[key]
+        if force:
+            sock, new_port = _probe_port(0)
+        else:
+            sock, new_port = _probe_port(port)  # keep the yml port if free
+            if sock is None:
+                sock, new_port = _probe_port(0)
+                print(f"⚠️  Port {port} is in use; remapping {host}:{port} -> {new_port}")
+        held_sockets.append(sock)
+        remap[key] = new_port
+        return new_port
+
+    for cfg in topology.values():
+        kind = cfg.get("kind")
+        if kind == "server":
+            if cfg.get("port"):
+                cfg["port"] = resolve(cfg.get("host"), cfg["port"])
+        elif kind == "edge":
+            svr = cfg.get("server", {})
+            # Skip name references; they resolve from the target entry later
+            if svr.get("port") and svr.get("host") not in topology:
+                svr["port"] = resolve(svr.get("host"), svr["port"])
+            cli = cfg.get("client", {})
+            if cli.get("port"):
+                cli["port"] = resolve(cli.get("host"), cli["port"])
+        elif kind == "client":
+            if cfg.get("port") and cfg.get("host") not in topology:
+                cfg["port"] = resolve(cfg.get("host"), cfg["port"])
+
+    if force:
+        print(f"🔀 FL_AUTO_PORTS=1: remapped {len(remap)} listen addresses to free ports")
+    return held_sockets
+
+
 
 def check_resources_and_get_gpus():
     """
@@ -249,6 +316,10 @@ def spawn_processes():
     with open(topo_file, "r") as file:
         topology = yaml.safe_load(file)
 
+    held_sockets = remap_topology_ports(
+        topology, force=os.environ.get("FL_AUTO_PORTS") == "1"
+    )
+
     # --- STEP 1: RESOLVE PORTS ---
     edge_configs = {} 
     
@@ -363,6 +434,9 @@ def spawn_processes():
     min_edges = sum(1 for count in edge_client_counts.values() if count > 0)
     
     print("🚀 Spawning processes in 3 seconds...")
+    # Release the held ports only now, so the servers can bind them
+    for s in held_sockets:
+        s.close()
     time.sleep(3)
 
     gpu_iterator = 0  # Round-robin counter
@@ -437,9 +511,16 @@ def spawn_processes():
             # --- GPU ASSIGNMENT (Linux) ---
             process_env = os.environ.copy()
             if num_gpus > 0:
-                gpu_id = gpu_iterator % num_gpus
+                parent_cvd = os.environ.get("CUDA_VISIBLE_DEVICES")
+                if parent_cvd:
+                    # SLURM (or the user) already restricted the visible GPUs.
+                    # Round-robin WITHIN that list; overwriting it with "0"
+                    # would point at physical GPU 0, which may not be ours.
+                    visible = [g.strip() for g in parent_cvd.split(",") if g.strip()]
+                    process_env["CUDA_VISIBLE_DEVICES"] = visible[gpu_iterator % len(visible)]
+                else:
+                    process_env["CUDA_VISIBLE_DEVICES"] = str(gpu_iterator % num_gpus)
                 gpu_iterator += 1
-                process_env["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
 
             cmd = ""
             if kind == "server":

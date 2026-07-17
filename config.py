@@ -1,11 +1,12 @@
 import os
+import json
 
 # --- CONTROL FLAGS ---
 # DEBUG = True  : Runs a single experiment (Legacy mode). Saves logs directly to 'logs/experiment_name'.
-#                 Ignores 'FL_RUN_ID' and uses the default SEED.
+#                 Ignores 'FL_RUN_ID' and uses BASE_SEED.
 # DEBUG = False : Runs in Batch Mode. Saves logs to 'logs/run_X/experiment_name'.
 #                 Expects 'FL_RUN_ID' from run_experiments.py to set dynamic seeds.
-DEBUG = True 
+DEBUG = True
 
 NUM_ROUNDS = 100
 TOPOLOGY_FILE = "topo-100c.yml"
@@ -16,37 +17,8 @@ MIN_CLIENTS_PER_EDGE = 10
 MODEL = "lenet_mnist"
 DATASET = "mnist"
 
-# --- DYNAMIC CONFIGURATION LOGIC ---
-if DEBUG:
-    # [DEBUG MODE] Single Execution, Standard Path
-    RUN = 0
-    # Manual Seed for testing
-    SEED = 42
-    
-    # No folder prefix -> saves to logs/dataset-model...
-    PATH_PREFIX = "" 
-    
-    print(f"[Config] 🟡 DEBUG MODE: Single Run | Seed: {SEED}")
-
-else:
-    # [BATCH MODE] Multi-Run, Isolated Folders
-    # run_experiments.py sets this environment variable
-    if "FL_RUN_ID" in os.environ:
-        RUN = int(os.environ["FL_RUN_ID"])
-    else:
-        # Default fallback if running simulate.py manually with DEBUG=False
-        RUN = 1 
-
-    # Dynamic Seed Calculation: Run 1->42, Run 2->43, etc.
-    # Ensures every run in the batch has a different random seed
-    SEED = 42 + (RUN - 1)
-    
-    # Path Prefix -> saves to logs/run_1/dataset-model...
-    PATH_PREFIX = f"run_{RUN}/"
-    
-    print(f"[Config] 🟢 BATCH MODE: Run {RUN} | Seed {SEED} | Path: logs/{PATH_PREFIX}...")
-
-# -----------------------------------
+# Debug/run 1 uses BASE_SEED; batch run r uses BASE_SEED + (r - 1)
+BASE_SEED = 42
 
 LOCAL_EPOCHS = 1
 BATCH_SIZE = 16
@@ -87,6 +59,54 @@ FEDMUT_ALPHA = 4
 
 DASHBOARD_SERVER_URL = "https://f772957a48fe.ngrok-free.app"
 ENABLE_DASHBOARD = False
+
+# --- PER-JOB OVERRIDES ---
+# run_experiments.py writes each experiment's dict to a job-private JSON file
+# and points FL_CONFIG_OVERRIDES at it. The env var is inherited by every
+# spawned process (simulate/edge/client/server/monitor), so parallel jobs on
+# one machine each see their own config without ever rewriting this file.
+_overrides = {}
+_override_file = os.environ.get("FL_CONFIG_OVERRIDES")
+if _override_file and os.path.exists(_override_file):
+    with open(_override_file) as f:
+        _overrides = json.load(f)
+    globals().update(_overrides)
+    print(f"[Config] 📦 Applied {len(_overrides)} overrides from {_override_file}")
+
+# --- DYNAMIC CONFIGURATION LOGIC ---
+if DEBUG:
+    # [DEBUG MODE] Single Execution, Standard Path
+    RUN = 0
+    SEED = BASE_SEED
+
+    # No folder prefix -> saves to logs/dataset-model...
+    PATH_PREFIX = ""
+
+    print(f"[Config] 🟡 DEBUG MODE: Single Run | Seed: {SEED}")
+
+else:
+    # [BATCH MODE] Multi-Run, Isolated Folders
+    # run_experiments.py sets this environment variable
+    if "FL_RUN_ID" in os.environ:
+        RUN = int(os.environ["FL_RUN_ID"])
+    else:
+        # Default fallback if running simulate.py manually with DEBUG=False
+        RUN = 1
+
+    # Dynamic Seed Calculation: Run 1->BASE_SEED, Run 2->BASE_SEED+1, etc.
+    SEED = BASE_SEED + (RUN - 1)
+
+    # Path Prefix -> saves to logs/run_1/dataset-model...
+    PATH_PREFIX = f"run_{RUN}/"
+
+    print(f"[Config] 🟢 BATCH MODE: Run {RUN} | Seed {SEED} | Path: logs/{PATH_PREFIX}...")
+
+# An explicit SEED in the overrides pins every run to that seed
+if "SEED" in _overrides:
+    SEED = _overrides["SEED"]
+
+# -----------------------------------
+
 SPLIT = PARTITIONER
 
 if PARTITIONER == "dirichlet":
