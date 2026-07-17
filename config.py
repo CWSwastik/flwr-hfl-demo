@@ -51,6 +51,11 @@ COMPRESS_ZI = False
 QUANTIZATION_BITS = 8
 TOPK_RATIO = 0.1
 
+# Sparse index encoding:
+#   "tuples" - 8 B index + 4 B value per kept coordinate (crossover rho*=1/3)
+#   "bitmap" - 1 bit per coordinate + 4 B per kept value  (crossover ~97%)
+INDEX_ENCODING = "tuples"
+
 # FedMut Configuration
 # 0 = Off, 1 = On
 FEDMUT_CENTRAL = 0
@@ -139,6 +144,9 @@ if COMPRESSION_METHOD != "none":
         compression_log += f"-compress_shap_{int(TOPK_RATIO*100)}pct{compress_end}"
     elif COMPRESSION_METHOD == "fisher":
         compression_log += f"-compress_fisher_{int(TOPK_RATIO*100)}pct{compress_end}"
+    # Keep bitmap runs in separate log folders from tuple-encoded runs
+    if INDEX_ENCODING == "bitmap" and COMPRESSION_METHOD in ("topk", "shap", "fisher"):
+        compression_log += "bitmap_"
 
 SPLIT = f"{SPLIT}-cluster_{CLUSTER_STRATEGY}-{TRAINING_STRATEGY}{fedmut_type}{'-dissimilar_cluster' if DISSIMILAR_CLUSTERING else ''}{compression_log}"
 

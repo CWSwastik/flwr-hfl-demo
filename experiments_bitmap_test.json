@@ -1,0 +1,38 @@
+[
+  {
+    "DEBUG": true,
+    "NUM_ROUNDS": 2,
+    "TOPOLOGY_FILE": "topo-15c.yml",
+    "NUM_CLIENTS": 15,
+    "MIN_CLIENTS_PER_EDGE": 5,
+    "DATASET": "mnist",
+    "MODEL": "lenet_mnist",
+    "PARTITIONER": "dirichlet",
+    "DIRICHLET_ALPHA": 0.2,
+    "GRADIENT_CORRECTION_BETA": 1,
+    "TRAINING_STRATEGY": "fedavg",
+    "COMPRESSION_METHOD": "topk",
+    "COMPRESS_YI": true,
+    "COMPRESS_ZI": true,
+    "TOPK_RATIO": 0.1,
+    "INDEX_ENCODING": "tuples"
+  },
+  {
+    "DEBUG": true,
+    "NUM_ROUNDS": 2,
+    "TOPOLOGY_FILE": "topo-15c.yml",
+    "NUM_CLIENTS": 15,
+    "MIN_CLIENTS_PER_EDGE": 5,
+    "DATASET": "mnist",
+    "MODEL": "lenet_mnist",
+    "PARTITIONER": "dirichlet",
+    "DIRICHLET_ALPHA": 0.2,
+    "GRADIENT_CORRECTION_BETA": 1,
+    "TRAINING_STRATEGY": "fedavg",
+    "COMPRESSION_METHOD": "topk",
+    "COMPRESS_YI": true,
+    "COMPRESS_ZI": true,
+    "TOPK_RATIO": 0.1,
+    "INDEX_ENCODING": "bitmap"
+  }
+]

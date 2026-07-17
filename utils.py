@@ -40,9 +40,10 @@ from config import (
     DATASET,
     DASHBOARD_SERVER_URL,
     NUM_CLASSES_PER_PARTITION,
-    COMPRESSION_METHOD, 
-    QUANTIZATION_BITS, 
-    TOPK_RATIO
+    COMPRESSION_METHOD,
+    QUANTIZATION_BITS,
+    TOPK_RATIO,
+    INDEX_ENCODING
 )
 
 random.seed(SEED)
@@ -453,6 +454,23 @@ def get_fisher_importance(model, data_loader, device, num_batches=1):
         
     return final_scores
 
+def _sparse_layer_entry(name, layer_flat, idxs, shape):
+    """Serializes one sparsified layer under INDEX_ENCODING.
+    "tuples": (index, value) pairs, 12 B per kept coordinate.
+    "bitmap": a 1-bit-per-coordinate presence mask plus the kept values in
+    index order; the mask length scales with the layer size (numel/8 bytes),
+    moving the byte crossover from rho*=1/3 to ~97%."""
+    idxs_np = idxs.numpy()
+    vals_np = layer_flat[idxs].numpy()
+    if INDEX_ENCODING == "bitmap":
+        mask = np.zeros(layer_flat.numel(), dtype=bool)
+        mask[idxs_np] = True
+        # receiver walks the mask left to right, so values go in index order
+        order = np.argsort(idxs_np)
+        return {"name": name, "vals": vals_np[order],
+                "mask": np.packbits(mask), "shape": shape}
+    return {"name": name, "vals": vals_np, "idxs": idxs_np, "shape": shape}
+
 def compress_model_update(model_diff: Dict[str, np.ndarray], importance_scores: Dict[str, np.ndarray] = None) -> Dict:
     """
     Compresses the difference (gradient/update/yi/zi).
@@ -487,14 +505,9 @@ def compress_model_update(model_diff: Dict[str, np.ndarray], importance_scores: 
             layer_flat = layer_t.flatten()
             k = max(1, int(layer_flat.numel() * TOPK_RATIO))
             vals, idxs = torch.topk(torch.abs(layer_flat), k)
-            original_vals = layer_flat[idxs]
-            
-            compressed_layers.append({
-                "name": name,
-                "vals": original_vals.numpy(), 
-                "idxs": idxs.numpy(), 
-                "shape": original_shape
-            })
+
+            compressed_layers.append(
+                _sparse_layer_entry(name, layer_flat, idxs, original_shape))
         
         # SHAP and FISHER share the same logic: 
         # Use external importance scores to pick indices, but send actual gradient values.
@@ -511,16 +524,10 @@ def compress_model_update(model_diff: Dict[str, np.ndarray], importance_scores: 
             
             # 2. Select Top K indices based on IMPORTANCE
             _, idxs = torch.topk(imp_flat, k)
-            
-            # 3. Retrieve ACTUAL values
-            original_vals = layer_flat[idxs]
-            
-            compressed_layers.append({
-                "name": name,
-                "vals": original_vals.numpy(), 
-                "idxs": idxs.numpy(), 
-                "shape": original_shape
-            })
+
+            # 3. Retrieve ACTUAL values (inside _sparse_layer_entry)
+            compressed_layers.append(
+                _sparse_layer_entry(name, layer_flat, idxs, original_shape))
     
     return {"method": COMPRESSION_METHOD, "layers": compressed_layers}
        
@@ -546,10 +553,16 @@ def decompress_model_update(compressed_payload: Union[Dict, Dict[str, np.ndarray
         for layer_data in compressed_payload["layers"]:
             name = layer_data["name"]
             shape = layer_data["shape"]
-            
-            flat = torch.zeros(int(np.prod(shape)))
-            flat[layer_data["idxs"]] = torch.tensor(layer_data["vals"]).float()
-            
+            numel = int(np.prod(shape))
+
+            flat = torch.zeros(numel)
+            if "mask" in layer_data:
+                # bitmap encoding: unpack presence bits, fill in index order
+                mask = np.unpackbits(layer_data["mask"], count=numel).astype(bool)
+                flat[torch.from_numpy(mask)] = torch.tensor(layer_data["vals"]).float()
+            else:
+                flat[layer_data["idxs"]] = torch.tensor(layer_data["vals"]).float()
+
             decompressed_dict[name] = flat.reshape(shape).numpy()
 
     return decompressed_dict
@@ -601,9 +614,10 @@ def get_payload_size(payload):
                             
                 elif method in ["topk", "shap", "fisher"]:
                     total_bytes += layer["vals"].nbytes
-                    total_bytes += layer["idxs"].nbytes
+                    # index carrier: positional tuples or packed bitmap
+                    total_bytes += (layer["mask"] if "mask" in layer else layer["idxs"]).nbytes
                     # Shape tuple (approx 8 bytes per dim)
-                    total_bytes += len(layer["shape"]) * 8 
+                    total_bytes += len(layer["shape"]) * 8
         
         # Case 3: Raw Dictionary { "layer_name": np.ndarray } (Before Compression)
         else:
